@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/duruer/frostpane/compare/v1.1.1...v1.1.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* **release:** bump only workspace crates in Cargo.lock ([2c0943f](https://github.com/duruer/frostpane/commit/2c0943f157752495ad9b233a15941f8f04bbf5f5))
+
 ## [1.1.1](https://github.com/duruer/frostpane/compare/v1.1.0...v1.1.1) (2026-11-18)
 
 

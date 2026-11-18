@@ -1368,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "fp-core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1406,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "fp-net"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "fp-core",
  "fp-sources",
@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "fp-overlay"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "bytemuck",
  "fp-core",
@@ -1552,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "fp-win"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "fp-core",
  "fp-tracker",
@@ -1562,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "fp-world"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "fp-characters",
  "fp-core",
@@ -1578,7 +1578,7 @@ dependencies = [
 
 [[package]]
 name = "frostpane"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "fp-core",
  "fp-decor",
