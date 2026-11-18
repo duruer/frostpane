@@ -74,13 +74,12 @@ fi
 if have deb; then
   command -v dpkg-deb >/dev/null || { echo "dpkg-deb missing" >&2; exit 1; }
   p="$stage/deb"
-  mkdir -p "$p/DEBIAN" "$p/usr/bin" "$p/usr/share/applications" \
-    "$p/usr/share/icons/hicolor/256x256/apps" "$p/usr/share/icons/hicolor/512x512/apps" \
-    "$p/usr/share/doc/frostpane"
+  mkdir -p "$p/DEBIAN" "$p/usr/bin" "$p/usr/share/applications" "$p/usr/share/doc/frostpane"
   strip_copy "$BIN" "$p/usr/bin/frostpane"
   install -m 0644 packaging/linux/frostpane.desktop "$p/usr/share/applications/frostpane.desktop"
-  install -m 0644 packaging/linux/icons/frostpane-256.png "$p/usr/share/icons/hicolor/256x256/apps/frostpane.png"
-  install -m 0644 packaging/linux/icons/frostpane-512.png "$p/usr/share/icons/hicolor/512x512/apps/frostpane.png"
+  for sz in 16 32 48 64 128 256 512; do
+    install -D -m 0644 "packaging/linux/icons/frostpane-$sz.png" "$p/usr/share/icons/hicolor/${sz}x${sz}/apps/frostpane.png"
+  done
   install -m 0644 LICENSE "$p/usr/share/doc/frostpane/copyright"
   sed -e "s/@VERSION@/$ver/" -e "s/@DEB_ARCH@/$deb_arch/" packaging/deb/control.in > "$p/DEBIAN/control"
   size_kb="$(du -sk "$p/usr" | cut -f1)"

@@ -8,6 +8,28 @@ use fp_paint::tiny_skia::Pixmap;
 use fp_paint::{IconName, Sketch, Trace, hex, icon_rgba, rgba};
 use std::collections::{HashMap, HashSet};
 
+/// Pre-rendered app icon PNGs (packaging/icons/frostpane.svg), by side in px.
+const APP_ICONS: [(u32, &[u8]); 4] = [
+    (64, include_bytes!("../../../packaging/icons/png/frostpane-64.png")),
+    (128, include_bytes!("../../../packaging/icons/png/frostpane-128.png")),
+    (256, include_bytes!("../../../packaging/icons/png/frostpane-256.png")),
+    (512, include_bytes!("../../../packaging/icons/png/frostpane-512.png")),
+];
+
+/// The pre-rendered app icon that suits `px` device pixels: the smallest one
+/// that is at least that big, else the biggest. Returns (side, RGBA image).
+pub fn app_icon_image(px: u32) -> Option<(u32, ColorImage)> {
+    let (side, bytes) = APP_ICONS.iter().copied().find(|(s, _)| *s >= px).unwrap_or(APP_ICONS[APP_ICONS.len() - 1]);
+    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?.to_rgba8();
+    rgba_image(img.width(), img.height(), img.as_raw()).map(|i| (side, i))
+}
+
+/// The window/taskbar icon (256 px).
+pub fn app_icon_data() -> Option<egui::IconData> {
+    let img = image::load_from_memory_with_format(APP_ICONS[2].1, image::ImageFormat::Png).ok()?.to_rgba8();
+    Some(egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() })
+}
+
 /// A `tiny-skia` pixmap (premultiplied) as an egui image.
 pub fn pixmap_image(p: &Pixmap) -> ColorImage {
     ColorImage::from_rgba_premultiplied([p.width() as usize, p.height() as usize], p.data())
@@ -82,6 +104,13 @@ impl Textures {
     pub fn icon(&mut self, ctx: &Context, name: IconName, color: u32, px: u32) -> Option<TextureHandle> {
         let key = format!("icon:{name:?}:{color:06x}:{px}");
         self.get(ctx, &key, || rgba_image(px, px, &icon_rgba(name, color, px)))
+    }
+
+    /// The app icon for a square `side` points wide, at the context's density.
+    pub fn app_icon(&mut self, ctx: &Context, side: f32) -> Option<TextureHandle> {
+        let px = (side * ctx.pixels_per_point()).ceil() as u32;
+        let chosen = APP_ICONS.iter().map(|(s, _)| *s).find(|s| *s >= px).unwrap_or(512);
+        self.get(ctx, &format!("app_icon:{chosen}"), || app_icon_image(px).map(|(_, i)| i))
     }
 
     /// A pixmap made by `make` at the context's pixel density.
@@ -231,6 +260,22 @@ mod tests {
             assert_eq!(img.size, [160, 100]);
         }
         assert!(tile_art(EffectKind::Snow, 0.0, 0.0, 1.0).is_some());
+    }
+
+    #[test]
+    fn app_icon_sizes_and_window_icon() {
+        // Smallest embedded size that is big enough, else the biggest.
+        for (px, want) in [(1, 64), (64, 64), (65, 128), (200, 256), (300, 512), (5000, 512)] {
+            let (side, img) = app_icon_image(px).unwrap();
+            assert_eq!(side, want);
+            assert_eq!(img.size, [want as usize; 2]);
+        }
+        let icon = app_icon_data().unwrap();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+        // The tile corner is transparent, the middle is not.
+        assert_eq!(icon.rgba[3], 0);
+        assert_eq!(icon.rgba[(128 * 256 + 128) * 4 + 3], 255);
     }
 
     #[test]

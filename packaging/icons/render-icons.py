@@ -1,85 +1,80 @@
 #!/usr/bin/env python3
-"""Regenerate the Frostpane icons from the geometry of docs/assets/logo.svg.
+"""Regenerate every Frostpane icon from packaging/icons/frostpane.svg.
 
-Needs Pillow (pip install pillow). Writes, next to this script's parent:
-  packaging/linux/icons/frostpane-256.png, frostpane-512.png
-  packaging/macos/Frostpane.icns   (PNG-based ICNS: 256, 512, 1024 px)
+Needs the resvg CLI (cargo install resvg --locked) and Pillow
+(pip install pillow). Run from anywhere:
 
-Run from anywhere:  python3 packaging/icons/render-icons.py
-The shapes below mirror logo.svg (128x128 viewBox); keep them in sync.
+    python -I -X utf8 packaging/icons/render-icons.py
+
+Writes:
+  packaging/icons/png/frostpane-{16,20,24,32,40,48,64,128,256,512,1024}.png
+  packaging/windows/frostpane.ico        (16..256, PNG-compressed)
+  packaging/macos/Frostpane.icns         (16..1024, PNG payloads)
+  packaging/linux/icons/frostpane-{16,32,48,64,128,256,512}.png
 """
 import io
-import math
 import os
+import shutil
 import struct
+import subprocess
+import sys
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.dirname(HERE)
-SS = 4  # supersampling factor
+SVG = os.path.join(HERE, "frostpane.svg")
+SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256, 512, 1024)
+LINUX = (16, 32, 48, 64, 128, 256, 512)
+ICO = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+# ICNS type codes holding PNG data: size -> tag.
+ICNS = {
+    16: b"icp4", 32: b"icp5", 64: b"icp6", 128: b"ic07",
+    256: b"ic08", 512: b"ic09", 1024: b"ic10",
+}
 
 
-def render(size):
-    n = size * SS
-    k = n / 128.0
-    # Diagonal gradient #4a92ff -> #1c5fd6 over the whole 128 box.
-    grad = Image.new("RGB", (n, n))
-    px = grad.load()
-    c0, c1 = (0x4A, 0x92, 0xFF), (0x1C, 0x5F, 0xD6)
-    for y in range(n):
-        for x in range(n):
-            t = (x + y) / (2.0 * (n - 1))
-            px[x, y] = tuple(round(a + (b - a) * t) for a, b in zip(c0, c1))
-    bg = Image.new("L", (n, n), 0)
-    ImageDraw.Draw(bg).rounded_rectangle([4 * k, 4 * k, 124 * k, 124 * k], radius=30 * k, fill=255)
-
-    fg = Image.new("L", (n, n), 0)
-    d = ImageDraw.Draw(fg)
-
-    def stroke(points, width):
-        pts = [(64 * k + x * k, 64 * k + y * k) for x, y in points]
-        d.line(pts, fill=255, width=round(width * k), joint="curve")
-        r = width * k / 2
-        for x, y in pts:
-            d.ellipse([x - r, y - r, x + r, y + r], fill=255)
-
-    def rot(points, deg):
-        a = math.radians(deg)
-        c, s = math.cos(a), math.sin(a)
-        return [(x * c - y * s, x * s + y * c) for x, y in points]
-
-    arm = [[(0, -36), (0, 36)], [(-9, -27), (0, -18), (9, -27)], [(-9, 27), (0, 18), (9, 27)]]
-    for deg in (0, 60, -60):
-        for part in arm:
-            stroke(rot(part, deg), 7)
-    # Hub ring: r=9, stroke 5.
-    c = 64 * k
-    d.ellipse([c - 11.5 * k, c - 11.5 * k, c + 11.5 * k, c + 11.5 * k], fill=255)
-    d.ellipse([c - 6.5 * k, c - 6.5 * k, c + 6.5 * k, c + 6.5 * k], fill=0)
-
-    out = Image.new("RGBA", (n, n), (0, 0, 0, 0))
-    out.paste(grad, (0, 0), bg)
-    out.paste(Image.new("RGB", (n, n), (255, 255, 255)), (0, 0), fg)
-    return out.resize((size, size), Image.LANCZOS)
+def resvg():
+    exe = shutil.which("resvg")
+    if not exe:
+        sys.exit("resvg not found: cargo install resvg --locked")
+    return exe
 
 
-def png_bytes(img):
-    b = io.BytesIO()
-    img.save(b, "PNG", optimize=True)
-    return b.getvalue()
+def render(exe, size, out):
+    subprocess.run([exe, "-w", str(size), "-h", str(size), SVG, out], check=True)
 
 
 def main():
-    os.makedirs(os.path.join(PKG, "linux", "icons"), exist_ok=True)
-    big = render(1024)
-    sizes = {s: big.resize((s, s), Image.LANCZOS) for s in (256, 512)}
-    for s in (256, 512):
-        sizes[s].save(os.path.join(PKG, "linux", "icons", f"frostpane-{s}.png"), optimize=True)
-    # ICNS: 'ic08' = 256, 'ic09' = 512, 'ic10' = 1024 (PNG payloads).
+    exe = resvg()
+    png_dir = os.path.join(HERE, "png")
+    os.makedirs(png_dir, exist_ok=True)
+    imgs = {}
+    for s in SIZES:
+        p = os.path.join(png_dir, f"frostpane-{s}.png")
+        render(exe, s, p)
+        imgs[s] = Image.open(p).convert("RGBA")
+        imgs[s].save(p, optimize=True)
+
+    lin = os.path.join(PKG, "linux", "icons")
+    os.makedirs(lin, exist_ok=True)
+    for s in LINUX:
+        shutil.copyfile(os.path.join(png_dir, f"frostpane-{s}.png"), os.path.join(lin, f"frostpane-{s}.png"))
+
+    win = os.path.join(PKG, "windows")
+    os.makedirs(win, exist_ok=True)
+    imgs[256].save(
+        os.path.join(win, "frostpane.ico"),
+        format="ICO",
+        sizes=[(s, s) for s in ICO],
+        append_images=[imgs[s] for s in ICO if s != 256],
+    )
+
     chunks = b""
-    for tag, img in ((b"ic08", sizes[256]), (b"ic09", sizes[512]), (b"ic10", big)):
-        data = png_bytes(img)
+    for s, tag in ICNS.items():
+        b = io.BytesIO()
+        imgs[s].save(b, "PNG", optimize=True)
+        data = b.getvalue()
         chunks += tag + struct.pack(">I", len(data) + 8) + data
     with open(os.path.join(PKG, "macos", "Frostpane.icns"), "wb") as f:
         f.write(b"icns" + struct.pack(">I", len(chunks) + 8) + chunks)

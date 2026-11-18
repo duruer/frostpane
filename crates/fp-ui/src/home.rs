@@ -26,12 +26,12 @@ impl Shell {
 
         // Header: logo, name, version.
         let header_y = full.top() + 30.0;
-        let logo = self.tex.pixmap(&ctx, "mascot:28", |s| mascot_pixmap(28.0, s, false));
+        let logo = self.tex.app_icon(&ctx, 28.0);
         if let Some(t) = &logo {
-            let r = Rect::from_min_size(pos2(full.left() + 22.0, header_y), vec2(22.4, 28.0));
+            let r = Rect::from_min_size(pos2(full.left() + 22.0, header_y), vec2(28.0, 28.0));
             ui.painter().image(t.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
-        let name_pos = pos2(full.left() + 22.0 + 22.4 + 12.0, header_y + 14.0);
+        let name_pos = pos2(full.left() + 22.0 + 28.0 + 12.0, header_y + 14.0);
         ui.painter().text(
             name_pos,
             egui::Align2::LEFT_CENTER,

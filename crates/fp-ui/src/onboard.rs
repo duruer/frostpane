@@ -183,22 +183,14 @@ impl Shell {
         }
     }
 
-    /// App icon (accent tile with the snow glyph), distinct from the mascot.
+    /// The app icon artwork.
     fn logo(&mut self, ui: &mut Ui, side: f64) {
         let ctx = ui.ctx().clone();
         let side = side as f32;
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), side), Sense::hover());
         let tile = Rect::from_center_size(r.center(), vec2(side, side));
-        ui.painter().rect_filled(tile, side * 0.24, self.tk.accent());
-        let g = side * 0.58;
-        let px = (g * ctx.pixels_per_point()).ceil() as u32;
-        if let Some(t) = self.tex.icon(&ctx, fp_paint::IconName::Snow, 0xFFFFFF, px) {
-            ui.painter().image(
-                t.id(),
-                Rect::from_center_size(tile.center(), vec2(g, g)),
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
+        if let Some(t) = self.tex.app_icon(&ctx, side) {
+            ui.painter().image(t.id(), tile, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
     }
 
