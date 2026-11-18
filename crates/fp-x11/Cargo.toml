@@ -1,17 +1,30 @@
 [package]
 name = "fp-x11"
-description = "Frostpane X11 backend (skeleton: null backends until implemented)."
+description = "Frostpane X11 backend: ARGB overlay panels, sprite windows, EWMH window source, RandR monitors, struts and pointer."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-or-later"
 publish = false
 
+# The pure logic (property parsing, frame math, struts, stacking, input
+# regions) builds and is tested on every target.
+[dependencies]
+fp-core.workspace = true
+fp-tracker.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 fp-platform.workspace = true
 fp-linux.workspace = true
 log.workspace = true
+libc.workspace = true
+tiny-skia.workspace = true
 wgpu = { workspace = true, features = ["vulkan", "gles"] }
+raw-window-handle = "0.6.2"
+x11rb = { version = "0.13.2", features = ["allow-unsafe-code", "dl-libxcb", "randr", "shape"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+x11rb = { version = "0.13.2", features = ["allow-unsafe-code", "dl-libxcb", "shape"] }
 
 [lints]
 workspace = true
