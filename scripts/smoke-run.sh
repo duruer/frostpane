@@ -50,7 +50,17 @@ if [ -n "${SMOKE_POST:-}" ]; then
   post_pid=$!
 fi
 # Hard limit well above --seconds so a hang fails instead of stalling CI.
-timeout $((secs + 45)) "$bin" --seconds "$secs" >"$log" 2>&1 || rc=$?
+# macOS has no coreutils `timeout`; fall back to gtimeout or a perl alarm.
+limit=$((secs + 45))
+if command -v timeout >/dev/null 2>&1; then
+  timeout "$limit" "$bin" --seconds "$secs" >"$log" 2>&1 || rc=$?
+elif command -v gtimeout >/dev/null 2>&1; then
+  gtimeout "$limit" "$bin" --seconds "$secs" >"$log" 2>&1 || rc=$?
+else
+  perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$limit" "$bin" --seconds "$secs" >"$log" 2>&1 || rc=$?
+  # perl's alarm ends the run with SIGALRM (142); report it like timeout(1).
+  if [ "$rc" -eq 142 ]; then rc=124; fi
+fi
 if [ -n "$post_pid" ]; then
   wait "$post_pid" || { echo "smoke: SMOKE_POST failed" >&2; sed 's/^/  | /' "$log" | tail -40; exit 1; }
 fi
