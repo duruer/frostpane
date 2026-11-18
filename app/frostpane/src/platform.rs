@@ -1,8 +1,8 @@
 //! Picks the platform backend at startup (porting design 2.3): Windows and
 //! macOS have one each; on Linux the session decides between Wayland and
-//! X11 (`fp_platform::select::linux`). Backends that are not implemented yet
-//! are the null backends: the app runs with its windows and tray, without
-//! overlay or object windows.
+//! X11 (`fp_platform::select::linux`). A backend whose display connection
+//! fails falls back to the null backends: the app runs with its windows and
+//! tray, without overlay or object windows, and `Limits` says so.
 
 use fp_core::desktop::MonitorInfo;
 use fp_overlay::OverlayHost;
@@ -19,7 +19,7 @@ pub struct Backend {
     pub services: Rc<dyn Services>,
     pub sprites: Box<dyn SpriteBackend>,
     pub overlay: MakeOverlay,
-    /// What this session cannot do (UI notices come later).
+    /// What this session cannot do (UI notices, menu card, hide fallback).
     pub limits: Limits,
     /// The egui windows must run on X11 (Linux).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]

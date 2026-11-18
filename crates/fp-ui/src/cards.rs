@@ -1,6 +1,7 @@
 //! Cards shown over the desktop as egui viewports (transparent, undecorated,
 //! always on top): snowman dress-up, tree style, Santa quote, limit snowman,
-//! train station bubble and the decoration picker.
+//! train station bubble, the decoration picker and, where the platform has
+//! no native context menu, the one-item decoration menu.
 //!
 //! The host opens a card from a `fp_world::CardRequest` ([`Cards::open`]),
 //! calls [`Cards::show`] every frame from `eframe::App::ui` and applies the
@@ -54,6 +55,8 @@ pub enum CardAction {
     UpdateLater,
     /// Open this https page (release page of the notice).
     OpenUrl(String),
+    /// The egui context menu's item was chosen: `Command::RemoveDecoration(id)`.
+    MenuChosen(u64),
 }
 
 /// Facts the host supplies when a card opens.
@@ -75,6 +78,8 @@ const TREE_WINDOW: (f32, f32) =
 const LIMIT_WINDOW: (f32, f32) = (cardmodel::LIMIT_SIZE.0 as f32, cardmodel::LIMIT_SIZE.1 as f32);
 const PICKER_WINDOW: (f32, f32) = (400.0, 560.0);
 const UPDATE_WINDOW: (f32, f32) = (468.0, 300.0);
+/// The one-item menu: a 200 x 52 card plus the glass gutter.
+const MENU_WINDOW: (f32, f32) = ((200.0 + 2.0 * dress::ROOM) as f32, (52.0 + 2.0 * dress::ROOM) as f32);
 
 struct Placed {
     /// Window top-left in egui logical points.
@@ -140,6 +145,13 @@ struct PointerCard {
     born: f64,
 }
 
+/// The egui stand-in for a native one-item context menu (Linux).
+struct MenuCard {
+    at: Placed,
+    label: String,
+    id: u64,
+}
+
 struct PickerCard {
     at: Placed,
     /// The window rect in global points (an obstacle for decoration spots).
@@ -159,6 +171,11 @@ pub struct Cards {
     picker: Option<PickerCard>,
     update: Option<UpdateCard>,
     pointer: Option<PointerCard>,
+    menu: Option<MenuCard>,
+    /// No global mouse buttons (Wayland): the dress and tree cards take
+    /// focus and close when they lose it instead of watching for an outside
+    /// press.
+    focus_close: bool,
     tex: Textures,
     rng: Lcg64,
     actions: Vec<CardAction>,
@@ -211,6 +228,8 @@ impl Cards {
             picker: None,
             update: None,
             pointer: None,
+            menu: None,
+            focus_close: false,
             tex: Textures::new(),
             rng: Lcg64::new(seed),
             actions: Vec::new(),
@@ -227,6 +246,26 @@ impl Cards {
             || self.picker.is_some()
             || self.update.is_some()
             || self.pointer.is_some()
+            || self.menu.is_some()
+    }
+
+    /// Dress and tree cards close on focus loss instead of an outside press
+    /// (platforms without global mouse buttons).
+    pub fn set_focus_close(&mut self, on: bool) {
+        self.focus_close = on;
+    }
+
+    /// Open the one-item menu for decoration `id` with its top-left at the
+    /// cursor (`cx.cursor`). Replaces a menu that is still open.
+    pub fn open_menu(&mut self, id: u64, label: &str, cx: &CardCtx<'_>, now: f64) {
+        let top_left = Vec2::new(cx.cursor.x - dress::ROOM, cx.cursor.y + dress::ROOM);
+        let at = self.placed(cx, top_left, MENU_WINDOW, now);
+        self.menu = Some(MenuCard { at, label: label.to_string(), id });
+    }
+
+    /// Decoration id of the open menu.
+    pub fn menu_open(&self) -> Option<u64> {
+        self.menu.as_ref().map(|m| m.id)
     }
 
     /// Bottom ball id of the open dress-up card.
@@ -419,6 +458,9 @@ impl Cards {
     /// host then watches for a press outside the app (desktop-native 3.11,
     /// snowman 104/304). Those cards are non-activating, so focus is no cue.
     pub fn outside_watch(&self) -> bool {
+        if self.focus_close {
+            return false;
+        }
         self.dress.as_ref().is_some_and(|c| !c.at.fade.is_fading())
             || self.tree.as_ref().is_some_and(|c| !c.at.fade.is_fading())
     }
@@ -465,6 +507,7 @@ impl Cards {
         self.picker = None;
         self.update = None;
         self.pointer = None;
+        self.menu = None;
     }
 
     // ---- drawing ----
@@ -480,6 +523,7 @@ impl Cards {
         self.show_picker(ctx, lang, now);
         self.show_update(ctx, lang, now);
         self.show_pointer(ctx, lang, now);
+        self.show_menu(ctx, now);
         if self.any_open() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
@@ -504,7 +548,8 @@ impl Cards {
         let mut close = false;
         let mut out = Vec::new();
         let op = c.at.fade.opacity(now);
-        let builder = Self::builder(&c.at).with_active(false);
+        let focus_close = self.focus_close;
+        let builder = Self::builder(&c.at).with_active(focus_close);
         let tex = &mut self.tex;
         ctx.show_viewport_immediate(ViewportId::from_hash_of("fp_card_dress"), builder, |ui, _| {
             transparent_panel(ui, |ui| {
@@ -569,7 +614,11 @@ impl Cards {
                     c.look = dress::reset();
                     out.push(CardAction::RestyleSnowman { bottom: c.bottom, look: None });
                 }
-                escape_close(ui, &mut close);
+                if focus_close {
+                    focus_close_card(ui, &mut c.at, &mut close);
+                } else {
+                    escape_close(ui, &mut close);
+                }
             });
         });
         self.actions.extend(out);
@@ -587,7 +636,8 @@ impl Cards {
         let mut close = false;
         let mut out = Vec::new();
         let op = c.at.fade.opacity(now);
-        let builder = Self::builder(&c.at).with_active(false);
+        let focus_close = self.focus_close;
+        let builder = Self::builder(&c.at).with_active(focus_close);
         let tex = &mut self.tex;
         let rng = &mut self.rng;
         ctx.show_viewport_immediate(ViewportId::from_hash_of("fp_card_tree"), builder, |ui, _| {
@@ -664,7 +714,11 @@ impl Cards {
                         close = true;
                     }
                 });
-                escape_close(ui, &mut close);
+                if focus_close {
+                    focus_close_card(ui, &mut c.at, &mut close);
+                } else {
+                    escape_close(ui, &mut close);
+                }
             });
         });
         self.actions.extend(out);
@@ -1047,6 +1101,48 @@ impl Cards {
         }
     }
 
+    /// The one-item menu: a single row button; focus loss or Escape closes it.
+    fn show_menu(&mut self, ctx: &Context, now: f64) {
+        let Some(mut c) = self.menu.take() else { return };
+        let tk = Tokens::new(true);
+        let op = c.at.fade.opacity(now);
+        let mut close = false;
+        let mut chosen = false;
+        let builder = Self::builder(&c.at);
+        ctx.show_viewport_immediate(ViewportId::from_hash_of("fp_card_menu"), builder, |ui, _| {
+            transparent_panel(ui, |ui| {
+                ui.set_opacity(op);
+                let card = glass(ui, &tk);
+                let row = card.shrink(6.0);
+                let resp = ui.interact(row, egui::Id::unique("fp_menu_item"), Sense::click());
+                if resp.hovered() {
+                    ui.painter().rect_filled(row, 9.0, Color32::from_white_alpha(theme::alpha_byte(0.12)));
+                }
+                ui.painter().text(
+                    pos2(row.left() + 14.0, row.center().y),
+                    Align2::LEFT_CENTER,
+                    &c.label,
+                    widgets::font(14.0),
+                    Color32::WHITE,
+                );
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    chosen = true;
+                }
+                focus_close_card(ui, &mut c.at, &mut close);
+            });
+        });
+        if chosen {
+            self.actions.push(CardAction::MenuChosen(c.id));
+            close = true;
+        }
+        if close && !c.at.fade.is_fading() {
+            c.at.fade.fade(now);
+        }
+        if !c.at.fade.finished(now) {
+            self.menu = Some(c);
+        }
+    }
+
     fn show_picker(&mut self, ctx: &Context, lang: Lang, now: f64) {
         let Some(mut c) = self.picker.take() else { return };
         let tk = Tokens::new(true);
@@ -1117,7 +1213,7 @@ impl Cards {
                 {
                     c.confirm_all = true;
                 }
-                focus_close(ui, &mut c.at, &mut close);
+                focus_close_card(ui, &mut c.at, &mut close);
             });
         });
         self.actions.extend(out);
@@ -1284,7 +1380,7 @@ fn red_gold(ui: &mut Ui, text: &str) -> Response {
 
 /// Close a card when it loses focus after having had it (the egui stand-in
 /// for the original's click-anywhere watcher) or on Escape.
-fn focus_close(ui: &Ui, at: &mut Placed, close: &mut bool) {
+fn focus_close_card(ui: &Ui, at: &mut Placed, close: &mut bool) {
     escape_close(ui, close);
     let focused = ui.input(|i| i.viewport().focused).unwrap_or(false);
     if focused {
@@ -1435,6 +1531,36 @@ mod tests {
         // The slot is free again.
         c.open(CardRequest::LimitReached { screen: Frame::new(0.0, 0.0, 1920.0, 1040.0) }, &cx(&l, &[]), 7.0);
         assert!(c.limit_open());
+    }
+
+    #[test]
+    fn focus_close_mode_never_arms_the_outside_watch() {
+        let l = layout();
+        let mut c = Cards::new(5);
+        c.set_focus_close(true);
+        let cxx = cx(&l, &[]);
+        c.open(CardRequest::DressUp { bottom: 1, look: None }, &cxx, 0.0);
+        assert!(!c.outside_watch());
+        let ctx = Context::default();
+        crate::testutil::frame(&ctx, |_| c.show_dress(&ctx, Lang::En, 0.1));
+        assert!(c.dress.is_some());
+    }
+
+    #[test]
+    fn menu_card_opens_replaces_and_closes() {
+        let l = layout();
+        let mut c = Cards::new(5);
+        let cxx = cx(&l, &[]);
+        assert_eq!(c.menu_open(), None);
+        c.open_menu(7, "Take down", &cxx, 0.0);
+        c.open_menu(9, "Take down", &cxx, 0.0);
+        assert_eq!(c.menu_open(), Some(9));
+        assert!(c.any_open());
+        let ctx = Context::default();
+        crate::testutil::frame(&ctx, |_| c.show_menu(&ctx, 0.1));
+        assert_eq!(c.menu_open(), Some(9));
+        c.close_all();
+        assert_eq!(c.menu_open(), None);
     }
 
     #[test]

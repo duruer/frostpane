@@ -38,7 +38,7 @@ pub mod wallpapers;
 pub mod widgets;
 
 pub use cards::{CardAction, CardCtx, Cards};
-pub use shell::{Decoder, HostInfo, Shell, UiAction, UpdateLine};
+pub use shell::{Decoder, HostInfo, Notices, Shell, UiAction, UpdateLine};
 pub use tray::Tray;
 
 #[cfg(test)]

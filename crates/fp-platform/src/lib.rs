@@ -57,6 +57,9 @@ impl<T: Platform + Shell + SystemEvents + Driver> Services for T {}
 pub struct Limits {
     /// No weather overlay.
     pub no_overlay: bool,
+    /// The overlay is off because no compositing manager runs (X11); a
+    /// finer reason for [`Limits::no_overlay`].
+    pub no_compositor: bool,
     /// No foreign window geometry: snow only on the ground and taskbar.
     pub no_window_geometry: bool,
     /// Only some foreign windows are seen (X11 clients under XWayland).
@@ -67,17 +70,21 @@ pub struct Limits {
     pub no_global_cursor: bool,
     /// Cards cannot be placed or kept on top.
     pub no_card_placement: bool,
+    /// The main window cannot be hidden (winit on Wayland): "hide" minimises.
+    pub no_window_hide: bool,
 }
 
 impl Limits {
     /// A session served by the [`null`] backends.
     pub const NULL: Limits = Limits {
         no_overlay: true,
+        no_compositor: false,
         no_window_geometry: true,
         foreign_windows_partial: false,
         no_native_menu: true,
         no_global_cursor: true,
         no_card_placement: false,
+        no_window_hide: false,
     };
 }
 
@@ -283,6 +290,7 @@ mod tests {
         assert_eq!(Limits::default(), none);
         let null = Limits::NULL;
         assert!(null.no_overlay && !null.foreign_windows_partial);
+        assert!(!null.no_compositor && !null.no_window_hide);
         assert!(format!("{:?}", Limits::NULL).contains("no_overlay"));
     }
 

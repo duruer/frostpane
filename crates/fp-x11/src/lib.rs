@@ -66,6 +66,7 @@ mod imp {
             overlay: X11Overlay,
             limits: Limits {
                 no_overlay: !composited || x.argb.is_none(),
+                no_compositor: !composited,
                 foreign_windows_partial: xwayland,
                 no_native_menu: true,
                 ..Limits::default()

@@ -52,11 +52,14 @@ pub fn backend(source: WindowSource) -> Parts<WlOverlay> {
     let ui_x11 = std::env::var("FROSTPANE_UI").is_ok_and(|v| v.trim().eq_ignore_ascii_case("x11"));
     let limits = Limits {
         no_overlay: wl.is_none(),
+        no_compositor: false,
         no_window_geometry: src.is_none(),
         foreign_windows_partial: false,
         no_native_menu: true,
         no_global_cursor: true,
         no_card_placement: !ui_x11,
+        // winit cannot unmap a Wayland toplevel; on XWayland it can.
+        no_window_hide: !ui_x11,
     };
     let services = platform::WlServices {
         inner: fp_linux::services(),

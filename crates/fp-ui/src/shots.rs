@@ -23,7 +23,7 @@
 
 use crate::cardmodel::CityState;
 use crate::model::{DisplayInfo, Pane, Tab};
-use crate::shell::{HostInfo, LoginNote, Shell, UiAction, UpdateLine};
+use crate::shell::{HostInfo, LoginNote, Notices, Shell, UiAction, UpdateLine};
 use crate::{CardCtx, Cards};
 use eframe::egui::{self, Color32, Pos2, Rect, Shape, Vec2, vec2};
 use egui_kittest::Harness;
@@ -314,8 +314,34 @@ fn scenes() -> Vec<Scene> {
         w
     }));
 
+    // Platform notices (porting design 7).
+    let notes: [(&str, Notices); 3] = [
+        ("notice-no-compositor", Notices { no_overlay: true, no_compositor: true, ..Notices::default() }),
+        (
+            "notice-wayland-ground-only",
+            Notices { no_window_geometry: true, no_global_cursor: true, ..Notices::default() },
+        ),
+        ("notice-xwayland", Notices { partial_windows: true, ..Notices::default() }),
+    ];
+    for (name, n) in notes {
+        v.push(Scene::new("effects", name, HOME, move |l| {
+            let mut w = home_world(l, Tab::Effects, |_, _| {});
+            if let Some(sh) = &mut w.shell {
+                sh.set_host(HostInfo { notices: n, ..host(true) });
+            }
+            w
+        }));
+    }
+
     // Wallpapers tab (ui 3.2).
     v.push(Scene::new("wallpapers", "packs", HOME, |l| home_world(l, Tab::Wallpapers, |_, _| {})));
+    v.push(Scene::new("wallpapers", "unsupported", HOME, |l| {
+        let mut w = home_world(l, Tab::Wallpapers, |_, _| {});
+        if let Some(sh) = &mut w.shell {
+            sh.set_host(HostInfo { wallpaper_supported: false, ..host(true) });
+        }
+        w
+    }));
     v.push(Scene::new("wallpapers", "picked-cycle", HOME, |l| {
         home_world(l, Tab::Wallpapers, |sh, _| {
             sh.picked.set(crate::wallpapers::cycle_id(EffectKind::Snow.wallpaper_id()))
@@ -527,6 +553,9 @@ fn scenes() -> Vec<Scene> {
     }
     v.push(Scene::new("card", "update", CARD, |l| {
         card_world(l, |c, cx| c.open_update("9.9.9", "https://example.org/release", cx, 0.0))
+    }));
+    v.push(Scene::new("card", "decor-menu", CARD, |l| {
+        card_world(l, |c, cx| c.open_menu(3, fp_text::t(l, Key::DecorTakeDown), cx, 0.0))
     }));
     v.push(Scene::new("card", "tray-pointer", CARD, |l| {
         card_world(l, |c, cx| {

@@ -45,6 +45,44 @@ pub struct HostInfo {
     pub decoder: Option<Decoder>,
     /// Monitor work areas in logical points (work rect / monitor scale), primary first.
     pub work_areas: Vec<Rect>,
+    /// What this desktop session cannot do (shown on the Effects tab).
+    pub notices: Notices,
+    /// The desktop lets the app change the wallpaper (false hides the
+    /// wallpaper switcher).
+    pub wallpaper_supported: bool,
+}
+
+/// Platform limits the UI explains (porting design 7), from the backend's
+/// `fp_platform::Limits`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Notices {
+    pub no_overlay: bool,
+    /// The overlay is off for want of a compositing manager (X11).
+    pub no_compositor: bool,
+    pub no_window_geometry: bool,
+    /// Only X11 clients are seen (XWayland fallback).
+    pub partial_windows: bool,
+    pub no_global_cursor: bool,
+}
+
+impl Notices {
+    /// The notice lines to show, most important first. Without an overlay
+    /// the snow lines are moot, so only the overlay line shows.
+    pub fn keys(&self) -> Vec<fp_text::Key> {
+        use fp_text::Key;
+        let mut out = Vec::new();
+        if self.no_overlay {
+            out.push(if self.no_compositor { Key::NoteNoCompositor } else { Key::NoteNoOverlay });
+        } else if self.no_window_geometry {
+            out.push(Key::NoteNoGeometry);
+        } else if self.partial_windows {
+            out.push(Key::NotePartialWindows);
+        }
+        if self.no_global_cursor {
+            out.push(Key::NoteNoCursor);
+        }
+        out
+    }
 }
 
 impl Default for HostInfo {
@@ -61,6 +99,8 @@ impl Default for HostInfo {
             custom_chrome: true,
             decoder: None,
             work_areas: Vec::new(),
+            notices: Notices::default(),
+            wallpaper_supported: true,
         }
     }
 }

@@ -88,6 +88,31 @@ fn fixed_row(ui: &mut Ui, text: &str, size: f32, color: Color32, h: f32) {
     ui.painter().galley(pos2(rect.left(), rect.center().y - g.size().y / 2.0), g, color);
 }
 
+/// A platform notice: an info glyph and wrapped text on a faint rounded card
+/// as wide as the column.
+fn notice(ui: &mut Ui, tk: &theme::Tokens, text: &str) {
+    egui::Frame::new()
+        .fill(tk.ink06())
+        .stroke(egui::Stroke::new(1.0, tk.ink10()))
+        .corner_radius(10.0)
+        .inner_margin(egui::Margin { left: 14, right: 14, top: 10, bottom: 10 })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let (r, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
+                let c = r.center();
+                ui.painter().circle_stroke(c, 7.0, egui::Stroke::new(1.4, tk.secondary()));
+                ui.painter().circle_filled(pos2(c.x, c.y - 3.2), 1.1, tk.secondary());
+                ui.painter()
+                    .line_segment([pos2(c.x, c.y - 0.8), pos2(c.x, c.y + 3.8)], egui::Stroke::new(1.5, tk.secondary()));
+                ui.vertical(|ui| {
+                    widgets::wrapped(ui, text, 12.5, tk.ink75());
+                });
+            });
+        });
+}
+
 /// Fade the scroll viewport's last rows into the sky so rows cut by the
 /// window bottom read as "more below" instead of a hard cut.
 fn bottom_fade(ui: &Ui, tk: &theme::Tokens) {
@@ -115,6 +140,14 @@ impl Shell {
         }
         ui.add_space(4.0);
         fixed_row(ui, self.t(fp_text::Key::PickLine), 12.0, tk.secondary(), 16.0);
+        let notes = self.host.notices.keys();
+        if !notes.is_empty() {
+            ui.add_space(12.0);
+            for k in notes {
+                notice(ui, &tk, self.t(k));
+                ui.add_space(6.0);
+            }
+        }
         if w.weather_on() {
             let r = Rect::from_min_size(pos2(ui.max_rect().right() - 220.0, top - 11.0), vec2(220.0, 36.0));
             let mut inner =
@@ -247,6 +280,16 @@ impl Shell {
         }
         widgets::section_title(ui, &tk, self.lang, self.t(fp_text::Key::WallpapersTitle));
         ui.add_space(14.0);
+        // The desktop cannot change the wallpaper: show the packs, no switcher.
+        let can_set = self.host.wallpaper_supported;
+        if !can_set {
+            notice(ui, &tk, self.t(fp_text::Key::WallpaperUnsupported));
+            ui.add_space(8.0);
+            if widgets::quiet_button(ui, &tk, self.t(fp_text::Key::OpenWallFolder), 32.0, true).clicked() {
+                self.emit(UiAction::OpenWallpapersFolder);
+            }
+            ui.add_space(14.0);
+        }
         let cw = widgets::cell_width(ui.available_width(), 3, GRID_GAP.0);
         let papers = self.papers.clone();
         for row in papers.chunks(3) {
@@ -258,7 +301,7 @@ impl Shell {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         let h = cw / 1.6;
                         let tex = self.pack_picture(&ctx, &p.main, p.effect, cw, h);
-                        let ringed = self.picked.ring(p.id);
+                        let ringed = can_set && self.picked.ring(p.id);
                         let resp = widgets::tile(ui, &tk, cw, 1.6, ringed, |ui, rect| {
                             if let Some(t) = &tex {
                                 egui::Image::new((t.id(), rect.size())).corner_radius(12.0).paint_at(ui, rect);
@@ -266,10 +309,10 @@ impl Shell {
                         });
                         let tile_rect = resp.rect;
                         let mut pill_hit = false;
-                        if p.daylong {
+                        if p.daylong && can_set {
                             pill_hit = self.day_pill(ui, p.id, p.effect, tile_rect);
                         }
-                        if resp.clicked() && !pill_hit {
+                        if can_set && resp.clicked() && !pill_hit {
                             self.emit(UiAction::Wallpaper(WallAction::Main { pack: p.id.to_string() }));
                         }
                         ui.add_space(6.0);
@@ -277,7 +320,7 @@ impl Shell {
                             widgets::label(ui, fp_text::wallpaper_name(self.lang, p.effect), 13.0, tk.ink());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 let text = fp_text::with_weather(self.lang, p.effect);
-                                if widgets::link_button(ui, tk.link(), &text, 12.5).clicked() {
+                                if can_set && widgets::link_button(ui, tk.link(), &text, 12.5).clicked() {
                                     self.emit(UiAction::WallpaperWith {
                                         action: WallAction::Main { pack: p.id.to_string() },
                                         effect: p.effect,

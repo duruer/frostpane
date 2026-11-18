@@ -406,3 +406,18 @@ fn fit_plan_uses_the_work_area_holding_the_window() {
     let (_, pos) = r.shell.fit_plan(crate::model::Screen::Onboarding, old, far, 1080.0);
     assert!(pos.is_some());
 }
+
+#[test]
+fn notices_pick_the_lines_to_show() {
+    use crate::Notices;
+    use fp_text::Key;
+    assert!(Notices::default().keys().is_empty());
+    let n = Notices { no_overlay: true, no_window_geometry: true, no_global_cursor: true, ..Notices::default() };
+    assert_eq!(n.keys(), vec![Key::NoteNoOverlay, Key::NoteNoCursor]);
+    let n = Notices { no_overlay: true, no_compositor: true, ..Notices::default() };
+    assert_eq!(n.keys(), vec![Key::NoteNoCompositor]);
+    let n = Notices { no_window_geometry: true, partial_windows: true, ..Notices::default() };
+    assert_eq!(n.keys(), vec![Key::NoteNoGeometry]);
+    let n = Notices { partial_windows: true, ..Notices::default() };
+    assert_eq!(n.keys(), vec![Key::NotePartialWindows]);
+}

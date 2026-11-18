@@ -26,13 +26,13 @@ use fp_core::surface::ScreenSnap;
 use fp_layered::LayeredHost;
 use fp_net::Worker;
 use fp_overlay::OverlayHost;
-use fp_platform::{Guard, Platform, Services, Shell as Os, SleepState, SystemClock, SystemEvent};
+use fp_platform::{Guard, Limits, Platform, Services, Shell as Os, SleepState, SystemClock, SystemEvent};
 use fp_sources::season;
 use fp_sources::update;
 use fp_tracker::{HookEvent, PollInput, Tracker, select_screens};
 use fp_ui::eframe::egui;
 use fp_ui::model::DisplayInfo;
-use fp_ui::{CardAction, CardCtx, Cards, HostInfo, Shell, Tray, TrayAction, UiAction, UpdateLine};
+use fp_ui::{CardAction, CardCtx, Cards, HostInfo, Notices, Shell, Tray, TrayAction, UiAction, UpdateLine};
 use fp_world::{CardRequest, Command, World, WorldInput, WorldOutput};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -79,6 +79,8 @@ pub struct Config {
     pub services: Rc<dyn Services>,
     pub sprites: Box<dyn fp_platform::sprites::SpriteBackend>,
     pub overlay: crate::platform::MakeOverlay,
+    /// What this session cannot do (notices, menu card, hide fallback).
+    pub limits: Limits,
 }
 
 /// Events from the system watcher, drained by the next tick.
@@ -108,6 +110,7 @@ pub struct Core {
     platform: Rc<dyn Services>,
     /// Builds the overlay for a monitor list (platform backend).
     make_overlay: crate::platform::MakeOverlay,
+    limits: Limits,
     data_dir: PathBuf,
     prefs: Prefs,
     weathers: Weathers,
@@ -276,6 +279,17 @@ fn tell_wallpaper_run(shell: &mut Shell, a: &fp_ui::wallpapers::WallAction, ok: 
     shell.wallpaper_result(Some(a.picked_id()), ok, now);
     if !ok && matches!(a, fp_ui::wallpapers::WallAction::TurnOn { .. }) {
         shell.cycle_stopped();
+    }
+}
+
+/// What a session's limits tell the UI.
+fn notices(l: &Limits) -> Notices {
+    Notices {
+        no_overlay: l.no_overlay,
+        no_compositor: l.no_compositor,
+        no_window_geometry: l.no_window_geometry,
+        partial_windows: l.foreign_windows_partial,
+        no_global_cursor: l.no_global_cursor,
     }
 }
 
@@ -536,9 +550,11 @@ impl Core {
             ticks: 0,
             platform,
             make_overlay: cfg.overlay,
+            limits: cfg.limits,
             ctx: ctx.clone(),
         };
         core.shell = Shell::new(core.host_info());
+        core.cards.set_focus_close(core.limits.no_global_cursor);
         core.shell.set_reduce_motion(core.reduce_motion);
         let wake = ctx.clone();
         match Tray::new(&core.weathers, lang, move || wake.request_repaint()) {
@@ -569,6 +585,8 @@ impl Core {
             custom_chrome: true,
             decoder: Some(Arc::new(crate::decode::decode)),
             work_areas: work_areas(&self.monitors),
+            notices: notices(&self.limits),
+            wallpaper_supported: Os::wallpaper_supported(&*self.platform),
             ..HostInfo::default()
         }
     }
@@ -637,6 +655,10 @@ impl Core {
         if now >= self.next_power {
             self.next_power = now + POWER_EVERY_S;
             self.read_power();
+            if self.monitors.is_empty() {
+                // No monitor yet (read before the display was ready): retry.
+                self.rebuild_pending = true;
+            }
         }
         let rescaled = self.overlay.as_ref().is_some_and(OverlayHost::rescaled);
         if take_rebuild(&mut self.rebuild_pending, rescaled) {
@@ -724,6 +746,7 @@ impl Core {
     }
 
     fn rebuild_displays(&mut self) {
+        let had_none = self.monitors.is_empty();
         self.monitors = self.platform.monitors();
         self.layout = Layout::new(self.monitors.clone());
         if let Some(o) = self.overlay.as_mut() {
@@ -747,6 +770,11 @@ impl Core {
         let host = self.host_info();
         self.shell.set_host(host);
         self.force_poll = true;
+        if had_none && !self.monitors.is_empty() && self.overlay.is_none() {
+            // The overlay failed for want of monitors: try again with them.
+            self.overlay_failed = false;
+            self.sync_effect();
+        }
     }
 
     fn recompute_main_frame(&mut self) {
@@ -908,10 +936,13 @@ impl Core {
             windows: &windows,
         };
         self.world.step(&input, &mut self.out);
-        if let Some((id, _)) = self.out.decor_menu.take()
-            && let Some(cmd) = decor_menu_command(&*self.platform, self.lang, self.cursor, id)
-        {
-            self.world.command(cmd, now);
+        if let Some((id, _)) = self.out.decor_menu.take() {
+            if self.limits.no_native_menu {
+                // No native popup (Linux): a one-item egui card at the cursor.
+                self.open_menu_card(id);
+            } else if let Some(cmd) = decor_menu_command(&*self.platform, self.lang, self.cursor, id) {
+                self.world.command(cmd, now);
+            }
         }
         if log::log_enabled!(target: "frostpane::balls", log::Level::Debug) {
             for sp in self.out.sprites.iter().filter(|sp| sp.key.owner_byte() == Owner::Ball as u8) {
@@ -987,6 +1018,19 @@ impl Core {
             self.outside.reset();
         }
         self.cards.open(req, &cx, now);
+        self.ctx.request_repaint();
+    }
+
+    fn open_menu_card(&mut self, id: u64) {
+        let now = self.egui_now();
+        let cx = CardCtx {
+            lang: self.lang,
+            layout: &self.layout,
+            sprites: &self.out.sprites,
+            cursor: self.cursor_point(),
+            tree_origin: None,
+        };
+        self.cards.open_menu(id, fp_text::t(self.lang, fp_text::Key::DecorTakeDown), &cx, now);
         self.ctx.request_repaint();
     }
 
@@ -1222,8 +1266,19 @@ impl Core {
     /// Close hides to the tray (core-app 2.3).
     pub fn hide(&mut self) {
         self.visible = false;
-        self.ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.send_hide();
         self.window_left();
+    }
+
+    /// Hides the main window; where it cannot be hidden (winit on Wayland
+    /// keeps the toplevel mapped) it is minimised instead.
+    fn send_hide(&self) {
+        let cmd = if self.limits.no_window_hide {
+            egui::ViewportCommand::Minimized(true)
+        } else {
+            egui::ViewportCommand::Visible(false)
+        };
+        self.ctx.send_viewport_cmd(cmd);
     }
 
     /// The window was hidden or minimised: the UI resets what it does not
@@ -1251,7 +1306,7 @@ impl Core {
         if self.startup_frames < STARTUP_HIDE_FRAMES {
             self.startup_frames += 1;
             if !self.visible {
-                self.ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.send_hide();
                 self.ctx.request_repaint();
             }
         }
@@ -1274,6 +1329,11 @@ impl Core {
         let focused = self.ctx.input(|i| i.viewport().focused).unwrap_or(false);
         let activated = focused && !self.focused;
         self.focused = focused;
+        if activated && !self.visible && self.limits.no_window_hide {
+            // The compositor ignored the minimise, or the user brought the
+            // window back from the taskbar: it is shown again.
+            self.visible = true;
+        }
         if self.visible {
             recheck_login(&*self.platform, &mut self.shell, activated);
         }
@@ -1286,7 +1346,9 @@ impl Core {
 
     /// The root `ui`: the main window while visible, and the cards.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        if self.visible && !self.minimized {
+        // A window that cannot be hidden keeps drawing (a mapped window
+        // without content is a black rectangle on Wayland).
+        if (self.visible || self.limits.no_window_hide) && !self.minimized {
             let wall = self.clock.wall();
             for a in self.shell.ui(ui, &self.weathers, self.lang, wall) {
                 self.apply_ui(a);
@@ -1434,6 +1496,7 @@ impl Core {
                 let _ = self.prefs.put(KEY_UPDATE_ASKED, &at);
             }
             CardAction::OpenUrl(url) => Os::open_url(&*self.platform, &url),
+            CardAction::MenuChosen(id) => self.world.command(Command::RemoveDecoration(id), now),
         }
     }
 
@@ -1482,6 +1545,17 @@ mod tests {
     use fp_core::geom::PixelRect;
     use fp_core::settings::City;
     use fp_platform::WallpaperScreen;
+
+    #[test]
+    fn limits_map_to_notices() {
+        let n = notices(&Limits::NULL);
+        assert!(n.no_overlay && n.no_window_geometry && n.no_global_cursor);
+        assert!(!n.no_compositor && !n.partial_windows);
+        let l = Limits { no_compositor: true, foreign_windows_partial: true, ..Limits::default() };
+        let n = notices(&l);
+        assert!(n.no_compositor && n.partial_windows && !n.no_overlay);
+        assert_eq!(notices(&Limits::default()), Notices::default());
+    }
 
     #[test]
     fn egui_passes_slow_down_while_nothing_shows() {

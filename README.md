@@ -123,8 +123,8 @@ Go to the [**latest release**](https://github.com/duruer/frostpane/releases/late
 
 Desktop support:
 
-- **X11:** full support.
-- **Wayland:** KDE Plasma, sway and Hyprland are supported. GNOME runs Frostpane through XWayland with fewer features.
+- **X11:** full support. Weather effects need a compositing window manager (most desktops have one; on a bare window manager start a compositor).
+- **Wayland:** KDE Plasma, sway and Hyprland are supported. Snow lands on windows only there, the main window minimizes instead of hiding, and cards appear where the desktop places them. GNOME runs Frostpane through XWayland with fewer features. Frostpane shows a note in the app for anything your session cannot do.
 - **Tray icon:** on GNOME you need the *AppIndicator and KStatusNotifierItem* extension to see it.
 
 ## 🛠️ For developers

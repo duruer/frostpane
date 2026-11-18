@@ -142,8 +142,14 @@ fn main() -> eframe::Result {
     }
     let lang = Lang::startup(settings.language.map(|l| l.code()), &os.os_language());
     let quiet_start = settings.seen_welcome && (args.quiet || at_login(&*os));
+    // Only the first window size depends on it: the first Home frame fits
+    // the window to the monitors `Core` reads once the event loop exists,
+    // and `Core` re-reads an empty list every few seconds.
     let work_height = {
         let monitors = os.monitors();
+        if monitors.is_empty() {
+            log::warn!("no monitors before the event loop; sizing the window for 1080 points");
+        }
         monitors
             .iter()
             .find(|m| m.primary)
@@ -162,7 +168,7 @@ fn main() -> eframe::Result {
     let slot: looped::TickSlot = Rc::default();
     #[cfg(not(windows))]
     let fill = slot.clone();
-    let platform::Backend { services, sprites, overlay, ui_x11, .. } = backend;
+    let platform::Backend { services, sprites, overlay, ui_x11, limits } = backend;
     let creator: eframe::AppCreator<'_> = Box::new(move |cc| {
         let ctx = cc.egui_ctx.clone();
         fp_ui::install(&ctx);
@@ -175,6 +181,7 @@ fn main() -> eframe::Result {
             services: services.clone(),
             sprites,
             overlay,
+            limits,
         };
         let core = Rc::new(RefCell::new(Core::new(ctx.clone(), cfg, quiet_start, lang, settings)));
         let tick = || -> Box<dyn FnMut()> {
