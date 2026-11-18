@@ -79,7 +79,7 @@ Every effect has a matching wallpaper, and each one can follow the time of day, 
 - **Private.** No account, no tracking, no analytics. Frostpane only goes online to check the weather for the city you choose, and to tell you when an update is out.
 - **Polite.** It never steals your clicks, and it can sit behind your windows if you prefer.
 - **Multi-monitor ready.** Snow falls on every screen you pick, at any scaling.
-- **Speaks your language.** English, Deutsch, Español, Français, 日本語, 한국어 and Русский.
+- **Speaks your language.** English, Deutsch, Español, Français, 日本語, 한국어, Русский, Türkçe and Қазақша.
 
 <div align="center">
 <table>
