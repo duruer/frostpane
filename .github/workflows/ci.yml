@@ -79,3 +79,79 @@ jobs:
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p frostpane
+
+  # macOS and Linux: fmt (once), clippy, tests and a smoke run. The coverage
+  # gate stays Windows-only (pure crates).
+  check-unix:
+    name: clippy, test, smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.99
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+          components: rustfmt, clippy
+          targets: ${{ runner.os == 'macOS' && 'x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: unix-${{ matrix.os }}
+
+      # libssl-dev + pkg-config: native-tls. fonts-noto-cjk: font tests.
+      # mesa-vulkan-drivers: lavapipe for the headless GPU tests.
+      # xvfb, openbox, x11-utils, imagemagick: the X11 smoke run.
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev fonts-noto-cjk \
+            libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri \
+            libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb1-dev libx11-dev \
+            xvfb openbox x11-utils imagemagick
+
+      - name: Format
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build app
+        run: cargo build -p frostpane
+
+      # While a backend is still the Null one this asserts a clean exit only;
+      # export SMOKE_REQUIRE_FRAMES=1 to demand presented frames.
+      - name: Smoke (X11)
+        if: runner.os == 'Linux'
+        env:
+          SMOKE_SHOT_DIR: ${{ runner.temp }}/shots
+        run: scripts/smoke-x11.sh -s 8
+
+      - name: Smoke (macOS)
+        if: runner.os == 'macOS'
+        run: scripts/smoke-macos.sh -s 6
+
+      - name: Upload smoke screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+
+      # Intel macOS is cross-compiled on the arm64 runner.
+      - name: Build x86_64-apple-darwin
+        if: runner.os == 'macOS'
+        run: |
+          cargo check --workspace --locked --target x86_64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin -p frostpane
