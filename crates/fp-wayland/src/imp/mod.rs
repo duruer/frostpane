@@ -6,8 +6,8 @@ mod sources;
 mod sprites;
 mod wl;
 
+pub use fp_linux::kwin_on_bus;
 pub use overlay::WlOverlay;
-pub use sources::kwin_on_bus;
 
 use fp_platform::select::WindowSource;
 use fp_platform::{Limits, Parts};

@@ -194,14 +194,6 @@ impl Drop for KWin {
     }
 }
 
-/// `org.kde.KWin` has an owner on the session bus.
-pub fn kwin_on_bus() -> bool {
-    let Ok(conn) = zbus::blocking::Connection::session() else { return false };
-    let Ok(dbus) = zbus::blocking::fdo::DBusProxy::new(&conn) else { return false };
-    let Ok(name) = zbus::names::BusName::try_from("org.kde.KWin") else { return false };
-    dbus.name_has_owner(name).unwrap_or(false)
-}
-
 // ---- selection -----------------------------------------------------------
 
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
