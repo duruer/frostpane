@@ -111,7 +111,7 @@ impl Shell {
             // CJK glyphs have no small caps; 11 pt reads smaller than the line below.
             fixed_row(ui, self.t(fp_text::Key::PickTitle), 13.0, tk.secondary(), 16.0);
         } else {
-            fixed_row(ui, &self.t(fp_text::Key::PickTitle).to_uppercase(), 11.0, tk.secondary(), 16.0);
+            fixed_row(ui, &fp_text::upper(self.lang, self.t(fp_text::Key::PickTitle)), 11.0, tk.secondary(), 16.0);
         }
         ui.add_space(4.0);
         fixed_row(ui, self.t(fp_text::Key::PickLine), 12.0, tk.secondary(), 16.0);
@@ -245,7 +245,7 @@ impl Shell {
             bottom_fade(ui, &tk);
             return;
         }
-        widgets::section_title(ui, &tk, self.t(fp_text::Key::WallpapersTitle));
+        widgets::section_title(ui, &tk, self.lang, self.t(fp_text::Key::WallpapersTitle));
         ui.add_space(14.0);
         let cw = widgets::cell_width(ui.available_width(), 3, GRID_GAP.0);
         let papers = self.papers.clone();
@@ -429,7 +429,7 @@ impl Shell {
                         });
                     });
                     ui.add_space(12.0);
-                    widgets::section_title(ui, &tk, self.t(fp_text::Key::OrPickTime));
+                    widgets::section_title(ui, &tk, self.lang, self.t(fp_text::Key::OrPickTime));
                     ui.add_space(10.0);
                     let cw = widgets::cell_width(TIME_CARD_W, 4, 10.0);
                     for (r, row) in wallpapers::times().chunks(4).enumerate() {
@@ -517,7 +517,7 @@ impl Shell {
         let titles = [fp_text::Key::HowStart, fp_text::Key::HowPlay, fp_text::Key::HowYours];
         for (si, key) in titles.into_iter().enumerate() {
             ui.horizontal(|ui| {
-                widgets::section_title(ui, &tk, self.t(key));
+                widgets::section_title(ui, &tk, self.lang, self.t(key));
                 if si == 1 {
                     ui.add_space(8.0);
                     widgets::label(ui, self.t(fp_text::Key::HowPlayNote), 12.0, tk.secondary());

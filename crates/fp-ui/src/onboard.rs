@@ -215,7 +215,7 @@ impl Shell {
             ui.add_space(10.0);
             sh.paragraph(ui, sh.t(Key::ObLangNote), 15.0, tk.secondary());
             ui.add_space(28.0);
-            for row in Lang::ALL.chunks(4) {
+            for row in Lang::ALL.chunks(5) {
                 let total = row.len() as f32 * 150.0 + (row.len() as f32 - 1.0) * 12.0;
                 let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 118.0), Sense::hover());
                 let mut x = area.center().x - total / 2.0;

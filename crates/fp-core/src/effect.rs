@@ -104,10 +104,13 @@ pub enum Lang {
     Fr,
     Ko,
     Ru,
+    Tr,
+    Kk,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 7] = [Lang::En, Lang::Ja, Lang::Es, Lang::De, Lang::Fr, Lang::Ko, Lang::Ru];
+    pub const ALL: [Lang; 9] =
+        [Lang::En, Lang::Ja, Lang::Es, Lang::De, Lang::Fr, Lang::Ko, Lang::Ru, Lang::Tr, Lang::Kk];
 
     pub fn code(self) -> &'static str {
         match self {
@@ -118,6 +121,8 @@ impl Lang {
             Lang::Fr => "fr",
             Lang::Ko => "ko",
             Lang::Ru => "ru",
+            Lang::Tr => "tr",
+            Lang::Kk => "kk",
         }
     }
 
@@ -135,6 +140,8 @@ impl Lang {
             Lang::Fr => "Français",
             Lang::Ko => "한국어",
             Lang::Ru => "Русский",
+            Lang::Tr => "Türkçe",
+            Lang::Kk => "Қазақша",
         }
     }
 
@@ -173,6 +180,14 @@ mod tests {
         }
         assert_eq!(Lang::startup(Some("de"), "fr"), Lang::De);
         assert_eq!(Lang::startup(Some("xx"), "fr"), Lang::Fr);
-        assert_eq!(Lang::startup(None, "tr"), Lang::En);
+        assert_eq!(Lang::startup(None, "tr"), Lang::Tr);
+        assert_eq!(Lang::startup(None, "kk"), Lang::Kk);
+        assert_eq!(Lang::startup(Some("kk"), "en"), Lang::Kk);
+        assert_eq!(Lang::startup(None, "zh"), Lang::En);
+        // New languages go at the end: saved indices and codes stay valid.
+        assert_eq!(Lang::ALL[6], Lang::Ru);
+        assert_eq!(&Lang::ALL[7..], &[Lang::Tr, Lang::Kk]);
+        assert_eq!(serde_json::to_string(&Lang::Kk).unwrap(), "\"kk\"");
+        assert_eq!(Lang::Tr.native_name(), "Türkçe");
     }
 }

@@ -134,3 +134,36 @@ pub(crate) static RU: &[Quote] = &[
         by: Some("Старая зимняя поговорка"),
     },
 ];
+
+pub(crate) static TR: &[Quote] = &[
+    q!("Kar yağarken acele etme; her tane kendi yerini bulur."),
+    q!("Sıcak bir çay, iyi bir dost, biraz da kar. Bu kadarı yeter."),
+    q!("Küçücük bir kartopu bile koca bir gülümseme başlatabilir."),
+    q!("Bugün kendine biraz nazik davran."),
+    q!("Her kış, içinde bir bahar saklar."),
+    q!("Yorulduysan dinlen. Kar da bazen durur."),
+    q!("Penceredeki buğuya bir kalp çiz."),
+    q!("Sandığından çok daha iyi gidiyorsun."),
+    q!("En soğuk günler, en sıcak sohbetleri getirir."),
+    q!("İki kar tanesi bile aynı değil. Sen de eşsizsin."),
+    Quote {
+        text: "Kar sessizce yağdığında şehir bir an durur ve insan kendi kalbinin sesini duyar.",
+        by: Some("Eski bir kış sözü"),
+    },
+];
+
+pub(crate) static KK: &[Quote] = &[
+    q!("Қыс ұзақ болса да, наурыз бәрібір келеді."),
+    q!("Ыстық шай мен жылы сөз — қыстың ең жақсы емі."),
+    q!("Үлкен аққала да бір уыс қардан басталады."),
+    q!("Бүгін өзіңе сәл мейірімді бол."),
+    q!("Ақ қар астында жер тынығып жатыр. Сен де тынық."),
+    q!("Терезедегі буға күн суретін сал."),
+    q!("Сен ойлағаныңнан әлдеқайда жақсы істеп жүрсің."),
+    q!("Достың жылуы аязды да жеңеді."),
+    q!("Әр қар ұшқыны өзгеше. Сен де солайсың."),
+    q!("Асықпа: қар да баяу жауып, әлемді әдемілейді."),
+    Quote {
+        text: "Тып-тыныш таңда аппақ далада әр қадамның сықыры әуен сияқты естіледі.", by: Some("Қысқы нақыл")
+    },
+];

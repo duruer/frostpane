@@ -1,5 +1,5 @@
 //! Changelog tab data and logic (ui 3.4). The release list is Frostpane's
-//! own; texts exist in the seven UI languages (English is the fallback).
+//! own; texts exist in every UI language (English is the fallback).
 
 use fp_core::effect::Lang;
 use fp_text::Key;
@@ -34,12 +34,12 @@ impl Kind {
     }
 }
 
-/// One change line: texts in `Lang::ALL` order (en ja es de fr ko ru); an
+/// One change line: texts in `Lang::ALL` order (en ja es de fr ko ru tr kk); an
 /// empty string falls back to English.
 #[derive(Clone, Copy, Debug)]
 pub struct Change {
     pub kind: Kind,
-    pub text: [&'static str; 7],
+    pub text: [&'static str; 9],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -71,7 +71,7 @@ impl Release {
     }
 }
 
-const fn c(kind: Kind, text: [&'static str; 7]) -> Change {
+const fn c(kind: Kind, text: [&'static str; 9]) -> Change {
     Change { kind, text }
 }
 
@@ -86,6 +86,8 @@ static V0_1_0: [Change; 8] = [
             "Six effets pour votre bureau : neige, pluie avec orage, cerisiers, feuilles d’automne, lucioles et étoiles filantes.",
             "바탕화면을 위한 여섯 가지 효과: 눈, 천둥을 동반한 비, 벚꽃, 단풍, 반딧불이, 별똥별.",
             "Шесть эффектов для рабочего стола: снег, дождь с грозой, сакура, листопад, светлячки и падающие звёзды.",
+            "Masaüstün için altı efekt: kar, fırtınalı yağmur, kiraz çiçeği, sonbahar yaprakları, ateş böcekleri ve kayan yıldızlar.",
+            "Жұмыс үстеліне алты әсер: қар, найзағайлы жаңбыр, шие гүлі, күзгі жапырақтар, жарқырауықтар және аққан жұлдыздар.",
         ],
     ),
     c(
@@ -98,6 +100,8 @@ static V0_1_0: [Change; 8] = [
             "Suivez la météo d’une ville de votre choix, la saison, ou laissez-vous surprendre.",
             "원하는 도시의 바깥 날씨나 계절을 따라가거나 랜덤으로 즐겨 보세요.",
             "Следуйте погоде выбранного города или времени года, либо доверьтесь случаю.",
+            "Seçtiğin bir şehrin havasına ya da mevsime uy, ya da bırak Frostpane seni şaşırtsın.",
+            "Таңдаған қалаңның ауа райына не жыл мезгіліне ер, болмаса Frostpane сені таң қалдырсын.",
         ],
     ),
     c(
@@ -110,6 +114,8 @@ static V0_1_0: [Change; 8] = [
             "Roulez des boules de neige, empilez des bonshommes et habillez-les avec la carte de style.",
             "눈덩이를 굴려 눈사람을 쌓고 스타일 카드로 꾸며 보세요.",
             "Катайте снежки, лепите снеговиков и наряжайте их карточкой стиля.",
+            "Kartopu yuvarla, kardan adamlar yap ve onları stil kartından giydir.",
+            "Қартоп домалат, аққала жаса және оны стиль картасынан киіндір.",
         ],
     ),
     c(
@@ -122,6 +128,8 @@ static V0_1_0: [Change; 8] = [
             "Plantez et décorez des sapins, accrochez guirlandes et boules où vous voulez sur le bureau.",
             "나무를 심어 꾸미고 조명과 장식을 바탕화면 어디든 걸어 보세요.",
             "Сажайте и украшайте ёлки, развешивайте гирлянды и шары где угодно на рабочем столе.",
+            "Ağaç dik ve süsle; ışıkları, topları ve daha fazlasını masaüstünde istediğin yere as.",
+            "Шырша отырғызып безендір, шамдар мен шарларды жұмыс үстелінің кез келген жеріне іл.",
         ],
     ),
     c(
@@ -134,6 +142,8 @@ static V0_1_0: [Change; 8] = [
             "Des visiteurs passent : le Père Noël et son cadeau du jour, le chasse-neige, le yéti, des combats de bonshommes et un petit train.",
             "산타(매일 선물), 제설차, 예티, 눈사람 싸움, 장난감 기차가 찾아와요.",
             "Приходят гости: Санта с подарком дня, снегоуборщик, йети, бои снеговиков и игрушечный поезд.",
+            "Ziyaretçiler uğrar: günlük hediyesiyle Noel Baba, kar küreme aracı, yeti, kardan adam savaşları ve küçük bir oyuncak tren.",
+            "Қонақтар келеді: күнделікті сыйлығымен Аяз Ата, қар тазалағыш, йети, аққалалар шайқасы және кішкентай ойыншық пойыз.",
         ],
     ),
     c(
@@ -146,6 +156,8 @@ static V0_1_0: [Change; 8] = [
             "Des fonds d’écran qui changent au fil de la journée.",
             "하루 시간에 따라 바뀌는 배경화면.",
             "Обои, меняющиеся в течение дня.",
+            "Günün saatine göre değişen duvar kâğıtları.",
+            "Тәулік мезгіліне қарай өзгеретін тұсқағаздар.",
         ],
     ),
     c(
@@ -158,6 +170,8 @@ static V0_1_0: [Change; 8] = [
             "Sept langues, une fenêtre de réglages et un menu de zone de notification à portée de main.",
             "일곱 가지 언어, 설정 창, 모든 것이 손닿는 트레이 메뉴.",
             "Семь языков, окно настроек и меню в трее со всем под рукой.",
+            "Yedi dil, bir ayarlar penceresi ve her şeyin elinin altında olduğu bir menü.",
+            "Жеті тіл, баптаулар терезесі және бәрі қол астында тұратын мәзір.",
         ],
     ),
     c(
@@ -170,6 +184,8 @@ static V0_1_0: [Change; 8] = [
             "La météo se met en pause sur batterie et ne gêne pas les applis plein écran.",
             "배터리 사용 중에는 멈추고 전체 화면 앱을 방해하지 않아요.",
             "На батарее погода приостанавливается и не мешает полноэкранным приложениям.",
+            "Pille çalışırken hava duraklar ve tam ekran uygulamalara engel olmaz.",
+            "Батареяда ауа райы кідіреді және толық экранды қолданбаларға кедергі жасамайды.",
         ],
     ),
 ];
@@ -226,10 +242,10 @@ mod tests {
     #[test]
     fn sorted_is_stable_by_kind() {
         static C: [Change; 4] = [
-            c(Kind::Fixed, ["f", "", "", "", "", "", ""]),
-            c(Kind::New, ["n1", "", "", "", "", "", ""]),
-            c(Kind::Improved, ["i", "", "", "", "", "", ""]),
-            c(Kind::New, ["n2", "", "", "", "", "", ""]),
+            c(Kind::Fixed, ["f", "", "", "", "", "", "", "", ""]),
+            c(Kind::New, ["n1", "", "", "", "", "", "", "", ""]),
+            c(Kind::Improved, ["i", "", "", "", "", "", "", "", ""]),
+            c(Kind::New, ["n2", "", "", "", "", "", "", "", ""]),
         ];
         let r = Release { number: "9", date: "2026-01-01", changes: &C };
         let t: Vec<_> = r.sorted().iter().map(|x| x.text(Lang::De)).collect();

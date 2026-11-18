@@ -198,6 +198,8 @@ pub fn lang_color(lang: fp_core::effect::Lang) -> u32 {
         Lang::Fr => 0x4C8FD6,
         Lang::Ko => 0x2FA37A,
         Lang::Ru => 0x8A5CD6,
+        Lang::Tr => 0x6A9A2E,
+        Lang::Kk => 0x1E9BB8,
     }
 }
 
@@ -243,7 +245,7 @@ mod tests {
             let _ = lang_color(l);
         }
         let colours: std::collections::HashSet<_> = fp_core::effect::Lang::ALL.iter().map(|l| lang_color(*l)).collect();
-        assert_eq!(colours.len(), 7);
+        assert_eq!(colours.len(), 9);
         let (a, b) = tile_sky(EffectKind::Snow);
         assert_ne!(a, b);
         assert!(noise(3, 1) >= 0.0 && noise(3, 1) < 1.0);

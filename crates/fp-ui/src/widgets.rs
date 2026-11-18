@@ -48,9 +48,9 @@ pub fn wrapped_bold(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Respo
     resp
 }
 
-/// Upper-cased 11 pt section title (ui 2.5 SectionTitle).
-pub fn section_title(ui: &mut Ui, tk: &Tokens, text: &str) -> Response {
-    label(ui, &text.to_uppercase(), 11.0, tk.secondary())
+/// Upper-cased 11 pt section title (ui 2.5 SectionTitle), cased for `lang`.
+pub fn section_title(ui: &mut Ui, tk: &Tokens, lang: fp_core::effect::Lang, text: &str) -> Response {
+    label(ui, &fp_text::upper(lang, text), 11.0, tk.secondary())
 }
 
 /// 1 px divider across the available width.
@@ -453,7 +453,7 @@ mod tests {
         crate::testutil::frame(&ctx, |ui| {
             label(ui, "a", 12.0, tk.ink());
             wrapped(ui, "b b b", 12.0, tk.ink());
-            section_title(ui, &tk, "title");
+            section_title(ui, &tk, fp_core::effect::Lang::Tr, "title");
             divider(ui, tk.divider());
             assert!(!primary_button(ui, &tk, "go", true).clicked());
             small_primary(ui, &tk, "go", false);

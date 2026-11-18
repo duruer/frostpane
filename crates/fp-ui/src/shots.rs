@@ -8,7 +8,7 @@
 //!   "First/Second/Double use of ... ID" with a red box; we read those
 //!   texts back from the frame's shapes).
 //! * `ui_shots` (only with `FROSTPANE_SHOTS=1`): renders every scene with
-//!   wgpu in en, de, ja and ru to
+//!   wgpu in en, de, ja, ru, tr and kk to
 //!   `target/ui-shots/<lang>/<area>-<name>.png`, writes
 //!   `target/ui-shots/clashes.txt` and `target/ui-shots/problems.txt`
 //!   (missing glyphs and other panics), and fails when either is not empty.
@@ -49,8 +49,9 @@ const GATE_FRAMES: usize = 8;
 const HOVER_FRAMES: usize = 16;
 /// Wall clock of every scene (2023-11-14 22:13 UTC).
 const WALL_UNIX: i64 = 1_700_000_000;
-/// Languages of the screenshot run: Latin, long words, CJK, Cyrillic.
-const SHOT_LANGS: [Lang; 4] = [Lang::En, Lang::De, Lang::Ja, Lang::Ru];
+/// Languages of the screenshot run: Latin, long words, CJK, Cyrillic,
+/// Turkish (dotted/dotless i) and Kazakh (extended Cyrillic).
+const SHOT_LANGS: [Lang; 6] = [Lang::En, Lang::De, Lang::Ja, Lang::Ru, Lang::Tr, Lang::Kk];
 
 /// What a scene draws.
 struct World {

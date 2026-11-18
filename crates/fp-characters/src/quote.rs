@@ -14,6 +14,8 @@ pub fn key(lang: Lang) -> &'static str {
         Lang::Fr => "quotesLeftFr",
         Lang::Ko => "quotesLeftKo",
         Lang::Ru => "quotesLeftRu",
+        Lang::Tr => "quotesLeftTr",
+        Lang::Kk => "quotesLeftKk",
     }
 }
 
@@ -48,7 +50,8 @@ mod tests {
         let mut sorted = keys.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), 7);
+        assert_eq!(keys[8], "quotesLeftKk");
+        assert_eq!(sorted.len(), 9);
     }
 
     #[test]

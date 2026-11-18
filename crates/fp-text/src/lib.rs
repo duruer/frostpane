@@ -3,7 +3,7 @@
 //! Spec: core-app 2.16 (string groups and purposes), misc 3 (visitors),
 //! ui 7 (localisation keys), snowballs 6, snowman 5, trees 3.9, decorations 9.
 //! All copy is written for Frostpane; nothing is taken from the original
-//! program. Seven languages: en, ja, es, de, fr, ko, ru.
+//! program. Nine languages: en, ja, es, de, fr, ko, ru, tr, kk.
 //!
 //! Every string lives in one table (`strings.rs`), one row per [`Key`] with
 //! one column per language, so a missing translation cannot compile. Text with
@@ -28,6 +28,8 @@ fn col(lang: Lang) -> usize {
         Lang::Fr => 4,
         Lang::Ko => 5,
         Lang::Ru => 6,
+        Lang::Tr => 7,
+        Lang::Kk => 8,
     }
 }
 
@@ -174,15 +176,31 @@ pub fn visitor(lang: Lang, v: Visitor) -> &'static str {
     )
 }
 
+/// Upper-case `s` for headings, with the language's casing rules: Turkish
+/// maps `i` to `İ` and `ı` to `I`; Kazakh `і` already maps to `І`.
+pub fn upper(lang: Lang, s: &str) -> String {
+    match lang {
+        Lang::Tr => s
+            .chars()
+            .map(|c| match c {
+                'i' => "İ".to_string(),
+                'ı' => "I".to_string(),
+                c => c.to_uppercase().collect(),
+            })
+            .collect(),
+        _ => s.to_uppercase(),
+    }
+}
+
 /// Menu label with a check marker.
 pub fn checked(_lang: Lang, label: &str) -> String {
     format!("\u{2713} {label}")
 }
 
 /// Fixed, untranslated title of the language row: the word "language" in all
-/// seven languages, so a user stuck in an unknown one can still find it.
+/// nine languages, so a user stuck in an unknown one can still find it.
 pub fn language_label() -> &'static str {
-    "Language / 言語 / Idioma / Sprache / Langue / 언어 / Язык"
+    "Language / 言語 / Idioma / Sprache / Langue / 언어 / Язык / Dil / Тіл"
 }
 
 /// Names of the eight times of day, in order (dawn first).
@@ -359,7 +377,7 @@ pub fn trim_name(lang: Lang, raw: &str) -> Option<&'static str> {
     lookup(&TRIMS, raw).map(|k| t(lang, k))
 }
 
-/// Plural category (CLDR subset used by the seven languages).
+/// Plural category (CLDR subset used by the UI languages).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Plural {
     One,
@@ -371,7 +389,8 @@ pub enum Plural {
 /// Plural category of `n` in `lang`.
 pub fn plural_category(lang: Lang, n: u64) -> Plural {
     match lang {
-        Lang::Ja | Lang::Ko => Plural::Other,
+        // Turkish and Kazakh keep the noun singular after a numeral.
+        Lang::Ja | Lang::Ko | Lang::Tr | Lang::Kk => Plural::Other,
         Lang::En | Lang::De | Lang::Es => {
             if n == 1 {
                 Plural::One
@@ -400,7 +419,7 @@ pub fn plural_category(lang: Lang, n: u64) -> Plural {
 }
 
 /// `"{n} screen(s)"` templates by language, then by [`Plural`] (one, few, many, other).
-const SCREEN_COUNT: [[&str; 4]; 7] = [
+const SCREEN_COUNT: [[&str; 4]; 9] = [
     ["{0} screen", "{0} screens", "{0} screens", "{0} screens"],
     ["{0}画面", "{0}画面", "{0}画面", "{0}画面"],
     ["{0} pantalla", "{0} pantallas", "{0} pantallas", "{0} pantallas"],
@@ -408,6 +427,8 @@ const SCREEN_COUNT: [[&str; 4]; 7] = [
     ["{0} écran", "{0} écrans", "{0} écrans", "{0} écrans"],
     ["{0}개 화면", "{0}개 화면", "{0}개 화면", "{0}개 화면"],
     ["{0} экран", "{0} экрана", "{0} экранов", "{0} экрана"],
+    ["{0} ekran", "{0} ekran", "{0} ekran", "{0} ekran"],
+    ["{0} экран", "{0} экран", "{0} экран", "{0} экран"],
 ];
 
 /// "N screens" with the right plural form.
@@ -450,8 +471,8 @@ pub fn update_prompt_body(lang: Lang, v: &str) -> String {
     fmt(lang, Key::UpdPromptBody, &[v])
 }
 
-/// Month names (en, es, de, fr, ru genitive) for [`format_date`].
-const MONTHS: [[&str; 12]; 5] = [
+/// Month names (en, es, de, fr, ru genitive, tr, kk) for [`format_date`].
+const MONTHS: [[&str; 12]; 7] = [
     [
         "January",
         "February",
@@ -522,6 +543,21 @@ const MONTHS: [[&str; 12]; 5] = [
         "ноября",
         "декабря",
     ],
+    ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"],
+    [
+        "қаңтар",
+        "ақпан",
+        "наурыз",
+        "сәуір",
+        "мамыр",
+        "маусым",
+        "шілде",
+        "тамыз",
+        "қыркүйек",
+        "қазан",
+        "қараша",
+        "желтоқсан",
+    ],
 ];
 
 /// Days in month `m` (1..=12) of year `y` (proleptic Gregorian).
@@ -565,6 +601,8 @@ pub fn format_date(lang: Lang, iso: &str) -> String {
         Lang::Fr => format!("{d} {} {y}", MONTHS[3][m - 1]),
         Lang::Ko => format!("{y}년 {m}월 {d}일"),
         Lang::Ru => format!("{d} {} {y} г.", MONTHS[4][m - 1]),
+        Lang::Tr => format!("{d} {} {y}", MONTHS[5][m - 1]),
+        Lang::Kk => format!("{y} жылғы {d} {}", MONTHS[6][m - 1]),
     }
 }
 
@@ -579,6 +617,8 @@ pub fn quotes(lang: Lang) -> &'static [Quote] {
         Lang::Fr => quotes::FR,
         Lang::Ko => quotes::KO,
         Lang::Ru => quotes::RU,
+        Lang::Tr => quotes::TR,
+        Lang::Kk => quotes::KK,
     }
 }
 
@@ -711,6 +751,20 @@ mod tests {
         assert!(update_prompt_body(Lang::Fr, "0.2.0").contains("0.2.0"));
         assert_eq!(checked(Lang::En, "Snow"), "\u{2713} Snow");
         assert!(language_label().contains("Язык"));
+        assert!(language_label().ends_with("/ Dil / Тіл"));
+        assert_eq!(with_weather(Lang::Tr, EffectKind::Snow), "Kar efektiyle");
+        assert_eq!(step(Lang::Kk, 2, 6), "Әсер 2/6");
+        assert_eq!(t(Lang::Tr, Key::TabSettings), "Ayarlar");
+        assert_eq!(t(Lang::Kk, Key::TabSettings), "Баптаулар");
+    }
+
+    #[test]
+    fn upper_follows_language_casing() {
+        assert_eq!(upper(Lang::Tr, "Bir efekt seç"), "BİR EFEKT SEÇ");
+        assert_eq!(upper(Lang::Tr, "ışık ve iğne"), "IŞIK VE İĞNE");
+        assert_eq!(upper(Lang::En, "pick it"), "PICK IT");
+        assert_eq!(upper(Lang::Kk, "әсер таңда, тіл"), "ӘСЕР ТАҢДА, ТІЛ");
+        assert_eq!(upper(Lang::De, "straße"), "STRASSE");
     }
 
     #[test]
@@ -804,6 +858,12 @@ mod tests {
         assert_eq!(screen_count(Lang::Ru, 5), "5 экранов");
         assert_eq!(screen_count(Lang::Ru, 21), "21 экран");
         assert_eq!(screen_count(Lang::Ja, 2), "2画面");
+        for n in [1, 3, 21] {
+            assert_eq!(plural_category(Lang::Tr, n), Other);
+            assert_eq!(plural_category(Lang::Kk, n), Other);
+        }
+        assert_eq!(screen_count(Lang::Tr, 3), "3 ekran");
+        assert_eq!(screen_count(Lang::Kk, 3), "3 экран");
         for l in Lang::ALL {
             for n in [0, 1, 2, 5, 11, 21] {
                 assert!(screen_count(l, n).contains(&n.to_string()));
@@ -820,6 +880,10 @@ mod tests {
         assert_eq!(format_date(Lang::Fr, "2026-12-01"), "1 décembre 2026");
         assert_eq!(format_date(Lang::Ko, "2026-01-02"), "2026년 1월 2일");
         assert_eq!(format_date(Lang::Ru, "2026-08-09"), "9 августа 2026 г.");
+        assert_eq!(format_date(Lang::Tr, "2026-11-18"), "18 Kasım 2026");
+        assert_eq!(format_date(Lang::Tr, "2026-02-01"), "1 Şubat 2026");
+        assert_eq!(format_date(Lang::Kk, "2026-11-18"), "2026 жылғы 18 қараша");
+        assert_eq!(format_date(Lang::Kk, "2026-04-30"), "2026 жылғы 30 сәуір");
         assert_eq!(format_date(Lang::En, "2028-02-29"), "February 29, 2028");
         assert_eq!(format_date(Lang::En, "2000-02-29"), "February 29, 2000");
         assert_eq!(format_date(Lang::En, "2026-12-31"), "December 31, 2026");
