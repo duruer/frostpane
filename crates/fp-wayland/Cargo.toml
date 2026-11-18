@@ -1,17 +1,42 @@
 [package]
 name = "fp-wayland"
-description = "Frostpane Wayland backend (skeleton: null backends until implemented)."
+description = "Frostpane Wayland backend: layer-shell overlay panels and sprite surfaces, outputs, sway/Hyprland/KWin window sources."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-or-later"
 publish = false
 
-[target.'cfg(target_os = "linux")'.dependencies]
+# The pure logic (`src/logic.rs`) builds and is tested on every target.
+[dependencies]
+fp-core.workspace = true
 fp-platform.workspace = true
+fp-tracker.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 fp-linux.workspace = true
+libc.workspace = true
 log.workspace = true
+tiny-skia.workspace = true
 wgpu = { workspace = true, features = ["vulkan", "gles"] }
+raw-window-handle = "0.6.2"
+smithay-client-toolkit = { version = "0.20.0", default-features = false }
+wayland-client = "0.31.15"
+# `client_system`: wgpu needs the libwayland `wl_display*` / `wl_surface*`;
+# `dlopen`: libwayland-client is loaded at run time (no link-time dependency).
+wayland-backend = { version = "0.3.17", features = ["client_system", "dlopen"] }
+wayland-protocols = { version = "0.32.13", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "wl_probe"
+path = "smoke/probe.rs"
+
+[[example]]
+name = "wl_sprites"
+path = "smoke/sprites.rs"
