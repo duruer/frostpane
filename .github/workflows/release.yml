@@ -3,6 +3,15 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Build and package every platform on the selected ref and upload the
+          results as workflow artifacts only: no tag, no release. Releases are
+          cut by pushes to main, so leave this on.
+        type: boolean
+        default: true
 
 # One release at a time; never cancel a release that is already running.
 concurrency:
@@ -18,6 +27,7 @@ env:
 jobs:
   version:
     name: Decide version and tag
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -52,29 +62,84 @@ jobs:
         run: npx semantic-release
 
   build:
-    name: Build ${{ matrix.arch }}
+    name: Build ${{ matrix.artifact }}
     needs: version
-    if: needs.version.outputs.version != ''
+    # Pushes build when semantic-release made a version; a manual run builds
+    # the selected ref as a dry run (the version job is skipped then).
+    if: >-
+      ${{ !cancelled() && (
+        (github.event_name == 'push' && needs.version.outputs.version != '') ||
+        (github.event_name == 'workflow_dispatch' && inputs.dry_run)) }}
     strategy:
       fail-fast: true
       matrix:
         include:
-          - arch: x64
+          - artifact: x64
+            kind: windows
+            arch: x64
             target: x86_64-pc-windows-msvc
             os: windows-latest
-          - arch: x86
+            paths: dist/*.zip
+          - artifact: x86
+            kind: windows
+            arch: x86
             target: i686-pc-windows-msvc
             os: windows-latest
-          - arch: arm64
+            paths: dist/*.zip
+          - artifact: arm64
+            kind: windows
+            arch: arm64
             target: aarch64-pc-windows-msvc
             os: windows-11-arm
+            paths: dist/*.zip
+          # Universal app: arm64 + x86_64 slices joined with lipo.
+          - artifact: macos-universal
+            kind: macos
+            target: aarch64-apple-darwin,x86_64-apple-darwin
+            os: macos-latest
+            paths: |
+              dist/*.dmg
+              dist/*.zip
+          # 22.04 keeps the glibc floor at 2.35 for the AppImage and tarball.
+          - artifact: linux-x64
+            kind: linux
+            arch: x64
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            paths: |
+              dist/*.tar.gz
+              dist/*.deb
+              dist/*.AppImage
+          - artifact: linux-arm64
+            kind: linux
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+            paths: |
+              dist/*.tar.gz
+              dist/*.deb
+              dist/*.AppImage
     runs-on: ${{ matrix.os }}
+    env:
+      TAG_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      # The tag points at the release commit, so the build sees the bumped version.
+      # The tag points at the release commit, so the build sees the bumped
+      # version. A dry run builds the ref the run was started on.
       - uses: actions/checkout@v7.0.1
         with:
-          ref: v${{ needs.version.outputs.version }}
+          ref: ${{ needs.version.outputs.version != '' && format('v{0}', needs.version.outputs.version) || '' }}
           persist-credentials: false
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [ -n "$TAG_VERSION" ]; then
+            v="$TAG_VERSION"
+          else
+            v="$(awk '/^\[workspace\.package\]/{p=1;next} /^\[/{p=0} p&&/^version[ ]*=/{gsub(/[^0-9.]/,"",$3); print $3; exit}' Cargo.toml)"
+          fi
+          [ -n "$v" ] || { echo "no version" >&2; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
 
       - name: Install Rust 1.99
         uses: dtolnay/rust-toolchain@master
@@ -84,36 +149,63 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2.9.3
         with:
-          key: release-${{ matrix.target }}
+          key: release-${{ matrix.artifact }}
+
+      - name: Install Linux packages
+        if: matrix.kind == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev binutils dpkg curl desktop-file-utils
 
       - name: Check crate version matches the tag
+        if: matrix.kind == 'windows'
         shell: pwsh
         run: |
-          $want = '${{ needs.version.outputs.version }}'
+          $want = $env:VERSION
           $meta = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
           $got = ($meta.packages | Where-Object name -eq 'frostpane').version
           if ($got -ne $want) { throw "frostpane crate version $got does not match release $want" }
 
+      - name: Check crate version matches the tag
+        if: matrix.kind != 'windows'
+        shell: bash
+        run: |
+          got="$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "frostpane") | .version')"
+          [ "$got" = "$VERSION" ] || { echo "frostpane crate version $got does not match release $VERSION" >&2; exit 1; }
+
       - name: Build
+        if: matrix.kind == 'windows'
         run: cargo build --release --locked --target ${{ matrix.target }} -p frostpane
 
       - name: Package
+        if: matrix.kind == 'windows'
         shell: pwsh
         run: |
-          $name = "frostpane-v${{ needs.version.outputs.version }}-windows-${{ matrix.arch }}"
+          $name = "frostpane-v$env:VERSION-windows-${{ matrix.arch }}"
           New-Item -ItemType Directory -Path "dist/$name" | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/frostpane.exe", LICENSE, README.md "dist/$name/"
           Compress-Archive -Path "dist/$name/*" -DestinationPath "dist/$name.zip"
 
+      # Builds both slices, lipo, Frostpane.app, ad-hoc codesign, dmg and zip.
+      - name: Package (macOS)
+        if: matrix.kind == 'macos'
+        run: scripts/package-macos.sh "$VERSION"
+
+      # Builds the binary, then tar.gz, deb and AppImage.
+      - name: Package (Linux)
+        if: matrix.kind == 'linux'
+        run: scripts/package-linux.sh ${{ matrix.arch }} "$VERSION"
+
       - uses: actions/upload-artifact@v7.0.2
         with:
-          name: frostpane-${{ matrix.arch }}
-          path: dist/*.zip
+          name: frostpane-${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
           if-no-files-found: error
 
   publish:
     name: Upload release assets
     needs: [version, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -125,10 +217,22 @@ jobs:
 
       - name: Checksums
         working-directory: dist
-        run: sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: |
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Upload to the release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "v${{ needs.version.outputs.version }}" dist/*.zip dist/SHA256SUMS.txt --clobber
+        run: gh release upload "v${{ needs.version.outputs.version }}" dist/* --clobber
+
+      # Dry run: everything stays a workflow artifact, nothing is published.
+      - name: Keep checksums (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: frostpane-checksums
+          path: dist/SHA256SUMS.txt
+          if-no-files-found: error

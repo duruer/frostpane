@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Frostpane
+GenericName=Desktop weather
+Comment=Snow, rain and other weather on your desktop
+Exec=frostpane
+Icon=frostpane
+Terminal=false
+Categories=Utility;
+Keywords=snow;weather;winter;rain;overlay;
+StartupNotify=false
