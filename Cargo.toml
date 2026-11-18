@@ -76,9 +76,16 @@ codegen-units = 4
 inherits = "release"
 debug = true
 
-# eframe 0.37.0 with one fix: invisible windows are painted from `new_events`
-# without the event loop context, so a card viewport opened while the main
-# window is hidden cannot create its window and egui panics. See
-# vendor/eframe/FROSTPANE.md. Drop this once upstream ships the fix.
+# eframe 0.37.0 with two fixes: invisible windows are painted from
+# `new_events` without the event loop context, so a card viewport opened
+# while the main window is hidden cannot create its window and egui panics;
+# and on Windows transparent viewport windows are created without a
+# redirection bitmap. See vendor/eframe/FROSTPANE.md. Drop this once
+# upstream ships the fixes.
+#
+# egui-wgpu 0.37.0 with one change: on Windows, transparent viewports (the
+# cards) get a DirectComposition surface instead of an HWND swapchain, which
+# DXGI only offers with opaque alpha. See vendor/egui-wgpu/FROSTPANE.md.
 [patch.crates-io]
 eframe = { path = "vendor/eframe" }
+egui-wgpu = { path = "vendor/egui-wgpu" }

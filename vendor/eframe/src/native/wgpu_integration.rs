@@ -1126,11 +1126,18 @@ impl Viewport {
 
         let viewport_id = self.ids.this;
 
-        match egui_winit::create_window(egui_ctx, event_loop, &self.builder) {
+        match create_viewport_window(egui_ctx, event_loop, &self.builder, painter) {
             Ok(window) => {
                 windows_id.insert(window.id(), viewport_id);
 
                 let window = Arc::new(window);
+
+                // Frostpane patch: per-viewport transparency for egui-wgpu
+                // (see vendor/egui-wgpu/FROSTPANE.md).
+                painter.set_viewport_transparent(
+                    viewport_id,
+                    self.builder.transparent.unwrap_or(false),
+                );
 
                 if let Err(err) =
                     pollster::block_on(painter.set_window(viewport_id, Some(Arc::clone(&window))))
@@ -1157,6 +1164,50 @@ impl Viewport {
             }
         }
     }
+}
+
+/// Frostpane patch: creates the window for a non-root viewport.
+///
+/// On Windows a transparent viewport painted with DX12 gets a
+/// DirectComposition surface from egui-wgpu (see
+/// `vendor/egui-wgpu/FROSTPANE.md`). Its window is created without a
+/// redirection bitmap (`WS_EX_NOREDIRECTIONBITMAP`): otherwise the window's
+/// own (opaque) surface shows through wherever the composition visual is
+/// transparent. The DWM border, the undecorated-window shadow and the
+/// rounded corner clip are turned off too, since the whole window rectangle
+/// is now see-through and the app draws its own shadow.
+fn create_viewport_window(
+    egui_ctx: &egui::Context,
+    event_loop: &ActiveEventLoop,
+    builder: &ViewportBuilder,
+    painter: &egui_wgpu::winit::Painter,
+) -> Result<Window, winit::error::OsError> {
+    #[cfg(windows)]
+    if builder.transparent == Some(true)
+        && painter
+            .render_state()
+            .is_some_and(|rs| rs.adapter.get_info().backend == egui_wgpu::wgpu::Backend::Dx12)
+    {
+        use winit::platform::windows::{CornerPreference, WindowAttributesExtWindows as _};
+
+        let window_attributes = egui_winit::apply_monitor_to_window_attributes(
+            egui_winit::create_winit_window_attributes(egui_ctx, builder.clone()),
+            builder,
+            event_loop,
+        )
+        .with_no_redirection_bitmap(true)
+        // No DWM border, shadow (and its 1px top line) or corner clip around
+        // the transparent margin.
+        .with_undecorated_shadow(false)
+        .with_border_color(None)
+        .with_corner_preference(CornerPreference::DoNotRound);
+        let window = event_loop.create_window(window_attributes)?;
+        egui_winit::apply_viewport_builder_to_window(egui_ctx, &window, builder);
+        return Ok(window);
+    }
+    #[cfg(not(windows))]
+    let _ = painter;
+    egui_winit::create_window(egui_ctx, event_loop, builder)
 }
 
 fn create_window(
