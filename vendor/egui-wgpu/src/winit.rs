@@ -95,10 +95,11 @@ impl Painter {
     /// Frostpane patch: marks a viewport's window as transparent (or not).
     /// Call it before the first [`Self::set_window`] for that viewport.
     ///
-    /// On Windows a transparent viewport gets a `DirectComposition` surface
-    /// with premultiplied alpha (DX12 only), even when the painter was
-    /// created without `support_transparent_backbuffer`. Other platforms
-    /// ignore it.
+    /// A transparent viewport gets a surface alpha mode with transparency
+    /// (premultiplied, else postmultiplied) when the surface offers one, even
+    /// when the painter was created without `support_transparent_backbuffer`.
+    /// On Windows it also gets a `DirectComposition` surface (DX12 only),
+    /// since HWND swapchains only offer opaque alpha.
     pub fn set_viewport_transparent(&mut self, viewport_id: ViewportId, transparent: bool) {
         if transparent {
             self.transparent_viewports.insert(viewport_id);
@@ -109,8 +110,7 @@ impl Painter {
 
     /// Whether the surface for `viewport_id` should carry alpha.
     fn wants_transparency(&self, viewport_id: ViewportId) -> bool {
-        self.support_transparent_backbuffer
-            || (cfg!(windows) && self.transparent_viewports.contains(&viewport_id))
+        self.support_transparent_backbuffer || self.transparent_viewports.contains(&viewport_id)
     }
 
     /// Frostpane patch: creates the surface for a window. On Windows a

@@ -2,7 +2,7 @@
 
 This is egui-wgpu 0.37.0 from crates.io (MIT OR Apache-2.0, see `LICENSE-MIT`
 and upstream at https://github.com/emilk/egui) with one change: per-pixel
-transparent windows on Windows.
+transparent viewports (on Windows through DirectComposition).
 
 Why: egui-wgpu creates every window surface with
 `wgpu::Instance::create_surface(window)`. On Windows that is a DXGI flip-model
@@ -10,7 +10,8 @@ swapchain on the HWND, and those only offer `CompositeAlphaMode::Opaque`. A
 transparent viewport (Frostpane's cards: a glass card with a soft shadow in a
 transparent margin) therefore rendered its margin as a black rectangle, on
 DX12, Vulkan and GL alike. Upstream also only honours transparency for the
-root viewport.
+root viewport, so on every platform a transparent child viewport got
+`CompositeAlphaMode::Auto` (opaque) when the root window is opaque.
 
 What changed:
 
@@ -23,9 +24,9 @@ What changed:
 - `src/winit.rs`:
   - `Painter::set_viewport_transparent(viewport_id, bool)` marks a viewport as
     transparent; the vendored eframe calls it per viewport. Transparency (the
-    alpha mode choice) now applies per viewport instead of only through the
-    painter-wide `support_transparent_backbuffer`. Other platforms ignore the
-    per-viewport flag, so their behaviour is unchanged.
+    alpha mode choice: premultiplied, else postmultiplied, when the surface
+    offers it) now applies per viewport on every platform instead of only
+    through the painter-wide `support_transparent_backbuffer`.
   - Surfaces are created by `create_window_surface`: on Windows, a transparent
     viewport gets the composition surface once the adapter (chosen through the
     first window's regular surface) is known to be DX12; anything else, or any
