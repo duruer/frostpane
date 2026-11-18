@@ -113,7 +113,10 @@ fn surface_config(size: (u32, u32)) -> wgpu::SurfaceConfiguration {
         width: size.0,
         height: size.1,
         present_mode: wgpu::PresentMode::Fifo,
-        desired_maximum_frame_latency: 2,
+        // Two swap chain buffers (desktop-native 3.2); wgpu adds one buffer
+        // to the latency. Each extra full-screen buffer is 4 bytes a pixel of
+        // committed memory on an integrated GPU.
+        desired_maximum_frame_latency: 1,
         alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
         view_formats: vec![],
         color_space: Default::default(),
