@@ -1,86 +1,123 @@
+<div align="center">
+
+<img src="docs/assets/logo.svg" width="96" alt="Frostpane logo">
+
 # Frostpane
 
-Frostpane puts weather on your Windows desktop. Snow settles on window tops
-and the taskbar. There is also rain with the odd thunderstorm, cherry blossom,
-autumn leaves, fireflies and shooting stars.
+### Let it snow — on your desktop.
 
-While it snows, you can do these things with the mouse:
+Snow that actually settles on your windows. Rain, cherry blossom, fireflies and shooting stars.<br>
+Snowballs you can throw, snowmen you can dress up. Free, forever.
 
-- Roll snowballs and throw them.
-- Stack snowballs into snowmen and dress them up.
-- Plant decorated trees and hang decorations.
+<p>
+  <a href="https://github.com/duruer/frostpane/releases/latest"><img src="https://img.shields.io/github/v/release/duruer/frostpane?style=for-the-badge&color=2b6fe0&label=Download" alt="Download"></a>
+  <a href="https://github.com/duruer/frostpane/releases"><img src="https://img.shields.io/github/downloads/duruer/frostpane/total?style=for-the-badge&color=5a88d6" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/Windows-x64%20%7C%20ARM64%20%7C%20x86-0b1a3a?style=for-the-badge&logo=windows11&logoColor=white" alt="Windows x64, ARM64 and x86">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-1f8a55?style=for-the-badge" alt="GPLv3"></a>
+</p>
 
-Now and then Santa, a snowplough, a yeti or a pair of quarrelling snowmen drop
-by.
+<img src="docs/assets/hero.svg" width="100%" alt="Snow piling up on top of app windows and the taskbar, with a snowman and a little tree">
 
-Frostpane lives in the system tray. The weather layer never takes your clicks.
+</div>
 
-## Features
+<br>
 
-- Snow builds up on windows and the taskbar, and drifts move with the windows.
-- Rain, sakura petals, autumn leaves, fireflies and starfall, with light and
-  heavy variants.
-- Optional "follow the weather outside" mode. It uses
-  [Open-Meteo](https://open-meteo.com/) for a city you pick, and needs no
-  account and no location services.
-- Matching wallpapers that can change with the time of day.
-- Multi-monitor and per-monitor DPI support.
-- Available in many languages.
+## ❄️ Your desktop, but cosier
 
-## Privacy
+Frostpane turns your everyday desktop into a little winter scene. Snowflakes drift down and **pile up on top of your windows and your taskbar**. Move a window and its snow comes along for the ride.
 
-- There are no accounts, no analytics, no telemetry and no crash uploads.
-- Frostpane makes only two kinds of network request:
-  - The weather lookup for the city you chose. It is off until you turn it on.
-  - A check for new releases. If one exists, Frostpane shows a notice. It never
-    updates itself.
+It never gets in your way. Clicks go straight through the weather to whatever you're working on, and it sits quietly in your system tray.
 
-## Install
+<div align="center">
+<img src="docs/assets/screens/effects.png" width="85%" alt="Pick an effect: snow, rain, cherry blossom, autumn leaves, fireflies and shooting stars">
+</div>
 
-Download the latest release from the
-[Releases](https://github.com/duruer/frostpane/releases) page. Builds are
-available for Windows x64, x86 and ARM64.
+## 🌦️ Six kinds of weather
 
-## Building from source
+| | | |
+|:-:|:-:|:-:|
+| ❄️ **Snow**<br><sub>Gentle flurries or a full blizzard</sub> | 🌧️ **Rain**<br><sub>Soft drizzle or a thunderstorm with lightning</sub> | 🌸 **Cherry blossom**<br><sub>Pink petals riding the spring breeze</sub> |
+| 🍂 **Autumn leaves**<br><sub>Golden leaves tumbling by</sub> | ✨ **Fireflies**<br><sub>Little lights glowing in the dark</sub> | 🌠 **Shooting stars**<br><sub>Make a wish</sub> |
 
-Requirements:
+Can't decide? Turn on **Follow the weather outside** and pick your city. When it snows where you are, it snows on your screen too.
 
-- Windows 11.
-- A recent stable Rust toolchain, installed with
-  [rustup](https://rustup.rs/).
-- The MSVC build tools.
+## ⛄ Play in the snow
 
-```
+When the snow is deep enough, the fun starts:
+
+- **Roll snowballs.** Sweep your mouse through a snowdrift and a snowball starts to form. Keep rolling to make it bigger.
+- **Throw them.** Grab a snowball, fling it across the screen, and watch it land on your windows.
+- **Build a snowman.** Stack three snowballs and say hello.
+- **Dress it up.** Top hats, bobble hats, crowns, scarves, faces and more.
+- **Decorate.** Plant a Christmas tree and hang ornaments wherever you like.
+- **Watch for visitors.** Santa, a snowplough, a yeti and a couple of grumpy snowmen like to drop by.
+
+<div align="center">
+<table>
+  <tr>
+    <td><img src="docs/assets/screens/dress-up.png" width="360" alt="Dress up your snowman with hats and scarves"></td>
+    <td><img src="docs/assets/screens/sakura.png" width="430" alt="A guided tour shows every effect"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Give every snowman their own style</sub></td>
+    <td align="center"><sub>A short tour shows you around</sub></td>
+  </tr>
+</table>
+</div>
+
+## 🖼️ Wallpapers to match
+
+Every effect has a matching wallpaper, and each one can follow the time of day, from a bright winter morning to a starry night.
+
+<div align="center">
+<img src="docs/assets/screens/wallpapers.png" width="85%" alt="Matching wallpapers for every effect, with day and night versions">
+</div>
+
+## 💙 Made to be nice
+
+- **Free, forever.** No ads, no premium tier, nothing locked away.
+- **Private.** No account, no tracking, no analytics. Frostpane only goes online to check the weather for the city you choose, and to tell you when an update is out.
+- **Polite.** It never steals your clicks, and it can sit behind your windows if you prefer.
+- **Multi-monitor ready.** Snow falls on every screen you pick, at any scaling.
+- **Speaks your language.** English, Deutsch, Español, Français, 日本語, 한국어 and Русский.
+
+<div align="center">
+<table>
+  <tr>
+    <td><img src="docs/assets/screens/welcome.png" width="400" alt="Welcome screen"></td>
+    <td><img src="docs/assets/screens/weather.png" width="400" alt="Settings with city search for live weather"></td>
+  </tr>
+</table>
+</div>
+
+## 📥 Get Frostpane
+
+1. Go to the [**latest release**](https://github.com/duruer/frostpane/releases/latest).
+2. Download the zip for your PC:
+   - **x64** for most computers.
+   - **ARM64** for Snapdragon and other ARM laptops.
+   - **x86** for 32-bit Windows.
+3. Unzip it and open `frostpane.exe`. That's it. Frostpane lives in your system tray.
+
+> **Tip:** Not sure which one you need? Open **Settings → System → About** in Windows and look at **System type**.
+
+## 🛠️ For developers
+
+Frostpane is written in Rust. To build it yourself:
+
+```sh
 cargo build --release
-target\release\frostpane.exe
 ```
 
-Run the tests with:
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/); new versions are released automatically from them. Bug reports and pull requests are welcome in [Issues](https://github.com/duruer/frostpane/issues).
 
-```
-cargo test --workspace
-```
+## 📄 License
 
-Command-line options:
+Frostpane is free software, released under the [GNU General Public License v3.0](LICENSE) or later.
 
-| Option | Effect |
-| --- | --- |
-| `--quiet` | Starts Frostpane in the tray. |
-| `--seconds N` | Exits after N seconds (for testing). |
+Weather data by [Open-Meteo](https://open-meteo.com/) (CC BY 4.0).
 
-Set `FROSTPANE_LOG=debug` for verbose logs.
-
-## Contributing
-
-Use [Conventional Commits](https://www.conventionalcommits.org/) for commit
-messages, for example `fix: ...` or `feat: ...`. Releases are generated from
-these messages.
-
-## License
-
-Frostpane is free software. You can redistribute it and modify it under the
-terms of the GNU General Public License, version 3 or later. See
-[`LICENSE`](LICENSE).
-
-Weather data is by [Open-Meteo](https://open-meteo.com/) under
-CC BY 4.0.
+<div align="center">
+<br>
+<sub>Made with ❄️ for everyone who wishes it snowed more often.</sub>
+</div>
