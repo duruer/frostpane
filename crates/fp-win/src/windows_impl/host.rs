@@ -74,7 +74,7 @@ impl HostWindow {
             )
             .ok()?;
             let state = Box::into_raw(Box::new(RefCell::new(handler)));
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as _);
             Some(HostWindow { hwnd, state })
         }
     }
