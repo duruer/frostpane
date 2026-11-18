@@ -1,5 +1,31 @@
 # Changelog
 
+# [1.2.0](https://github.com/duruer/frostpane/compare/v1.1.4...v1.2.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* **macos:** no idle wake-ups from the loop wrapper, menu bar agent policy ([27db0b1](https://github.com/duruer/frostpane/commit/27db0b16b8cc67364af29ddfbdbef5f24758d35a))
+* overlay and sprite hooks for scaled X11 and Wayland sessions ([6e84f3d](https://github.com/duruer/frostpane/commit/6e84f3d75987f244a361ce9d11e71fc1ffea797a))
+* softer crystal arms on near snowflakes ([85681bf](https://github.com/duruer/frostpane/commit/85681bf008d17376ab86e3bf76b73a58be426526))
+* transparent card windows on macOS and Linux ([6edcc20](https://github.com/duruer/frostpane/commit/6edcc205b6555bce32ff5ebef13bf6c8a3c156ea))
+* transparent card windows on Windows ([38b022b](https://github.com/duruer/frostpane/commit/38b022b1cee8c92d4fa94b9d66d24869c67e2e52))
+
+
+### Features
+
+* Frostpane app icon ([5fce59f](https://github.com/duruer/frostpane/commit/5fce59f37e65f0f3d7fd9f4a23bb431851112040))
+* install updates from inside the app ([a3819b3](https://github.com/duruer/frostpane/commit/a3819b312417ddedcac94b50b5d6ebb1228697ea))
+* **linux:** add platform-free X11 backend logic ([3e6d5ba](https://github.com/duruer/frostpane/commit/3e6d5ba791d31f5ee4eda69c651a05cce6597a26))
+* **linux:** implement the X11 backend ([1a40b49](https://github.com/duruer/frostpane/commit/1a40b497f50039f20199d8b03ff87e77f9a6a499))
+* **linux:** pure logic for session services ([7d01e85](https://github.com/duruer/frostpane/commit/7d01e85e711bc74939db7fbedbbfebba0e3704f1))
+* **linux:** single instance, D-Bus system events, autostart, wallpaper ([8f7f3d8](https://github.com/duruer/frostpane/commit/8f7f3d8c796403e4bc05c1544336ee104663d10b))
+* macOS and Linux support ([e33965c](https://github.com/duruer/frostpane/commit/e33965c5f3d6150ff3df5c3ec8e59b21a4c1977b))
+* **macos:** implement the macOS backend ([c0c1ba5](https://github.com/duruer/frostpane/commit/c0c1ba5b12115aa2cbda6895b442dbb9584d268c))
+* snowflakes with real shapes and a gentle tumble ([78f3c0a](https://github.com/duruer/frostpane/commit/78f3c0a9fe841837331033a176b4ca4b505832f4))
+* **wayland:** add platform-free Wayland logic and KWin script ([d13c837](https://github.com/duruer/frostpane/commit/d13c837ba3965acaa6fbb0b2d69a2a51d1c2fa60))
+* **wayland:** layer-shell overlay, sprite surfaces and window sources ([8b20185](https://github.com/duruer/frostpane/commit/8b201859741914125eaacd45c56121b5640ede2f))
+
 ## [1.1.4](https://github.com/duruer/frostpane/compare/v1.1.3...v1.1.4) (2026-11-18)
 
 
