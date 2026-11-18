@@ -793,7 +793,7 @@ impl Host {
         }))
         .map_err(|e| format!("no adapter: {e}"))
         .and_then(|adapter| {
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            pollster::block_on(adapter.request_device(&crate::gpu::device_descriptor()))
                 .map_err(|e| format!("no device: {e}"))
         });
         let (device, queue) = match device {

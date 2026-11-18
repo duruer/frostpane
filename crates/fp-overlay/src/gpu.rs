@@ -95,6 +95,24 @@ pub struct Gpu {
     pipelines: Mutex<HashMap<PassKind, Arc<wgpu::RenderPipeline>>>,
 }
 
+/// Shader-visible descriptors the overlay device reserves. Each pass slot
+/// holds at most four buffer bindings, so a few thousand is far more than
+/// any frame needs.
+pub const DESCRIPTORS: u32 = 4096;
+
+/// Device settings of the overlay: small GPU memory blocks and a small
+/// descriptor heap. The defaults (`Performance` memory hint, one million
+/// descriptors) commit about 270 MB per device up front; on an integrated GPU
+/// that is ordinary process memory. With these the device costs about 30 MB.
+pub fn device_descriptor() -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor {
+        label: Some("frostpane overlay"),
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        required_limits: wgpu::Limits { max_non_sampler_bindings: DESCRIPTORS, ..Default::default() },
+        ..Default::default()
+    }
+}
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -162,7 +180,7 @@ impl Gpu {
                 }))
             })
             .map_err(|e| format!("no adapter: {e}"))?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor()))
             .map_err(|e| format!("no device: {e}"))?;
         Ok(Self::new(device, queue))
     }

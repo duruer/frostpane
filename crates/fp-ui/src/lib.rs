@@ -128,6 +128,36 @@ pub fn viewport_builder(
         .with_visible(visible)
 }
 
+/// Shader-visible descriptors the egui device reserves: one per live texture
+/// bind group, so this leaves room for thousands of images.
+pub const UI_DESCRIPTORS: u32 = 16_384;
+
+/// Renderer settings for the egui windows: DX12 only on Windows (no Vulkan
+/// or GL instance next to it), low power adapter preference, small GPU memory
+/// blocks and a small descriptor heap. The defaults (`Performance` hint, one
+/// million descriptors) commit about 270 MB per device up front, which on an
+/// integrated GPU is ordinary process memory. `WGPU_BACKEND` and
+/// `WGPU_POWER_PREF` still override.
+pub fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+    use eframe::wgpu;
+    let mut create = WgpuSetupCreateNew::without_display_handle();
+    if cfg!(windows) {
+        create.instance_descriptor.backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::DX12);
+    }
+    create.power_preference = wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::LowPower);
+    let base = create.device_descriptor.clone();
+    create.device_descriptor = std::sync::Arc::new(move |adapter| {
+        let d = base(adapter);
+        wgpu::DeviceDescriptor {
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            required_limits: wgpu::Limits { max_non_sampler_bindings: UI_DESCRIPTORS, ..d.required_limits.clone() },
+            ..d
+        }
+    });
+    WgpuConfiguration { wgpu_setup: WgpuSetup::CreateNew(create), ..Default::default() }
+}
+
 /// Stateless compatibility entry for the scaffold app: draws the main
 /// window through a private [`Shell`] and returns only the tray-style
 /// actions. New code should own a [`Shell`] and handle [`UiAction`]s.
