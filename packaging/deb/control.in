@@ -1,0 +1,17 @@
+Package: frostpane
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @DEB_ARCH@
+Maintainer: Frostpane contributors <noreply@users.noreply.github.com>
+Homepage: https://github.com/duruer/frostpane
+Depends: libc6 (>= 2.35), libssl3 | libssl3t64
+Recommends: libvulkan1, mesa-vulkan-drivers, libgl1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, fonts-noto-cjk
+Suggests: gnome-shell-extension-appindicator
+Description: Snow, rain and other weather on your desktop
+ Frostpane draws falling snow, rain, cherry blossom, autumn leaves,
+ fireflies and shooting stars over your desktop. Snow settles on your
+ windows, and you can roll snowballs and build snowmen. Clicks pass straight
+ through. Runs from the system tray.
+ .
+ Full support on X11; Wayland on KDE, sway and Hyprland (layer-shell).
