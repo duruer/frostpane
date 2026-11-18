@@ -77,6 +77,32 @@ fn hemisphere() {
     assert!(!is_south(None, "UTC-11 Standard Time", Some(-5.0)));
 }
 
+#[test]
+fn hemisphere_iana() {
+    use season::is_south;
+    for z in [
+        "Australia/Sydney",
+        "australia/perth",
+        "Antarctica/McMurdo",
+        "America/Argentina/Buenos_Aires",
+        "America/Sao_Paulo",
+        "America/Santiago",
+        "Pacific/Auckland",
+        " Africa/Johannesburg ",
+        "Indian/Cocos",
+    ] {
+        assert!(is_south(None, z, None), "{z}");
+    }
+    for z in ["Europe/Berlin", "America/New_York", "Asia/Singapore", "Australia", "Austr", "Australia\u{e9}x"] {
+        assert!(!is_south(None, z, Some(-10.0)), "{z}");
+    }
+    assert!(is_south(None, "Australia/", None));
+    assert!(is_south(None, "America/Bogota", Some(-4.0)));
+    assert!(!is_south(None, "America/Bogota", Some(4.0)));
+    assert!(!is_south(None, "Asia/Jakarta", None));
+    assert!(!is_south(Some(10.0), "Australia/Sydney", None));
+}
+
 fn cur(code: u32, day: bool, snow: f64) -> Current {
     Current { weather_code: code, is_day: day, temperature_c: 0.0, snowfall_cm: snow, wind_kmh: 0.0 }
 }

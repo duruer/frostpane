@@ -10,6 +10,8 @@
 //!
 //! `fp-win` gathers [`WindowInfo`] from the OS and executes the decisions.
 
+pub mod synth;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use fp_core::desktop::{Layout, Screen};
@@ -72,6 +74,57 @@ pub struct WindowInfo {
     /// DWM extended frame bounds; `None` when the query failed.
     pub bounds: Option<PixelRect>,
     pub process_name: String,
+}
+
+/// Class name given to [`WindowInfo::portable`] windows; never a shell class.
+pub const PORTABLE_CLASS: &str = "portable";
+
+/// What a non-Windows backend knows about one top-level window (porting
+/// design 1.6). [`WindowInfo::portable`] turns it into Win32-flavoured bits.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PortableWindow {
+    pub id: i64,
+    /// Frame in pixels; `None` when the query failed.
+    pub bounds: Option<PixelRect>,
+    /// Minimized / hidden.
+    pub iconic: bool,
+    /// On another desktop or space.
+    pub cloaked: bool,
+    /// Kept above normal windows (occluder only).
+    pub topmost: bool,
+    pub own_process: bool,
+    /// Window opacity; `None` = opaque.
+    pub alpha: Option<u8>,
+    pub owner: String,
+}
+
+impl WindowInfo {
+    /// A visible app window with a caption, so [`filter`] treats it like a
+    /// normal (or, with `topmost`, an occluder) Windows window: `EX_TOPMOST`
+    /// when topmost, `EX_LAYERED` with `layered_alpha` when an alpha is set.
+    /// Own-process windows follow the Windows rule: listed unless topmost.
+    pub fn portable(p: PortableWindow) -> Self {
+        let mut ex_style = 0;
+        if p.topmost {
+            ex_style |= EX_TOPMOST;
+        }
+        if p.alpha.is_some() {
+            ex_style |= EX_LAYERED;
+        }
+        WindowInfo {
+            hwnd: p.id,
+            visible: true,
+            iconic: p.iconic,
+            cloaked: p.cloaked,
+            style: WS_CAPTION,
+            ex_style,
+            own_process: p.own_process,
+            class: PORTABLE_CLASS.into(),
+            layered_alpha: p.alpha,
+            bounds: p.bounds,
+            process_name: p.owner,
+        }
+    }
 }
 
 /// A window that passed the filter.
@@ -590,6 +643,44 @@ mod tests {
         let mut o = win(3);
         o.own_process = true;
         assert!(filter(&o).is_some());
+    }
+
+    #[test]
+    fn portable_windows() {
+        assert!(!SHELL_CLASSES.contains(&PORTABLE_CLASS));
+        let base = PortableWindow {
+            id: 4,
+            bounds: Some(PixelRect::new(0, 0, 100, 100)),
+            owner: "app".into(),
+            ..Default::default()
+        };
+        let w = WindowInfo::portable(base.clone());
+        assert_eq!((w.hwnd, w.visible, w.style, w.ex_style, w.layered_alpha), (4, true, WS_CAPTION, 0, None));
+        let l = filter(&w).unwrap();
+        assert_eq!((l.id, l.layer, l.alpha, l.owner.as_str()), (4, 0, 1.0, "app"));
+        let with = |f: fn(&mut PortableWindow)| {
+            let mut p = base.clone();
+            f(&mut p);
+            filter(&WindowInfo::portable(p))
+        };
+        let top = WindowInfo::portable(PortableWindow { topmost: true, alpha: Some(153), ..base.clone() });
+        assert_eq!(top.ex_style, EX_TOPMOST | EX_LAYERED);
+        let l = filter(&top).unwrap();
+        assert_eq!(l.layer, 1);
+        assert!((l.alpha - 0.6).abs() < 1e-9);
+        assert!(with(|p| p.iconic = true).is_none());
+        assert!(with(|p| p.cloaked = true).is_none());
+        assert!(with(|p| p.bounds = None).is_none());
+        assert!(with(|p| p.alpha = Some(76)).is_none());
+        assert!(with(|p| p.alpha = Some(77)).is_some());
+        assert!(with(|p| p.own_process = true).is_some());
+        assert!(
+            with(|p| {
+                p.own_process = true;
+                p.topmost = true;
+            })
+            .is_none()
+        );
     }
 
     fn mon(id: &str, px: PixelRect, primary: bool) -> MonitorInfo {

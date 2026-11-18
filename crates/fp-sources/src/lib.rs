@@ -100,6 +100,129 @@ pub mod season {
     const SPLIT_FULL: [&str; 6] =
         ["UTC-11", "UTC-09", "UTC+12", "UTC+13", "Line Islands Standard Time", "Dateline Standard Time"];
 
+    /// IANA zone prefixes wholly in the south (macOS/Linux ids).
+    const IANA_SOUTH_PREFIX: [&str; 3] = ["Australia/", "Antarctica/", "America/Argentina/"];
+
+    /// IANA zones wholly in the south (including old aliases).
+    const IANA_SOUTH: [&str; 73] = [
+        "America/Sao_Paulo",
+        "America/Araguaina",
+        "America/Bahia",
+        "America/Maceio",
+        "America/Recife",
+        "America/Fortaleza",
+        "America/Noronha",
+        "America/Campo_Grande",
+        "America/Cuiaba",
+        "America/Porto_Velho",
+        "America/Rio_Branco",
+        "America/Eirunepe",
+        "America/Porto_Acre",
+        "America/Santiago",
+        "America/Punta_Arenas",
+        "America/Asuncion",
+        "America/Montevideo",
+        "America/La_Paz",
+        "America/Lima",
+        "America/Buenos_Aires",
+        "America/Catamarca",
+        "America/Cordoba",
+        "America/Jujuy",
+        "America/Mendoza",
+        "America/Rosario",
+        "Brazil/East",
+        "Brazil/Acre",
+        "Brazil/DeNoronha",
+        "Chile/Continental",
+        "Chile/EasterIsland",
+        "Pacific/Easter",
+        "Pacific/Auckland",
+        "Pacific/Chatham",
+        "Pacific/Fiji",
+        "Pacific/Tongatapu",
+        "Pacific/Apia",
+        "Pacific/Pago_Pago",
+        "Pacific/Samoa",
+        "Pacific/Niue",
+        "Pacific/Rarotonga",
+        "Pacific/Tahiti",
+        "Pacific/Marquesas",
+        "Pacific/Gambier",
+        "Pacific/Pitcairn",
+        "Pacific/Norfolk",
+        "Pacific/Noumea",
+        "Pacific/Efate",
+        "Pacific/Guadalcanal",
+        "Pacific/Bougainville",
+        "Pacific/Port_Moresby",
+        "Pacific/Funafuti",
+        "Pacific/Wallis",
+        "Pacific/Fakaofo",
+        "Pacific/Nauru",
+        "Pacific/Kanton",
+        "Pacific/Enderbury",
+        "Africa/Johannesburg",
+        "Africa/Maseru",
+        "Africa/Mbabane",
+        "Africa/Windhoek",
+        "Africa/Gaborone",
+        "Africa/Harare",
+        "Africa/Lusaka",
+        "Africa/Maputo",
+        "Africa/Blantyre",
+        "Africa/Luanda",
+        "Africa/Dar_es_Salaam",
+        "Africa/Bujumbura",
+        "Africa/Kigali",
+        "Indian/Mauritius",
+        "Indian/Reunion",
+        "Indian/Antananarivo",
+        "Atlantic/Stanley",
+    ];
+
+    /// More IANA zones wholly in the south (islands).
+    const IANA_SOUTH_ISLANDS: [&str; 10] = [
+        "Indian/Mayotte",
+        "Indian/Comoro",
+        "Indian/Mahe",
+        "Indian/Chagos",
+        "Indian/Cocos",
+        "Indian/Christmas",
+        "Indian/Kerguelen",
+        "Atlantic/St_Helena",
+        "Atlantic/South_Georgia",
+        "Asia/Dili",
+    ];
+
+    /// IANA zones whose area (or country) straddles the equator.
+    const IANA_SPLIT: [&str; 25] = [
+        "America/Bogota",
+        "America/Guayaquil",
+        "America/Manaus",
+        "America/Belem",
+        "America/Santarem",
+        "America/Boa_Vista",
+        "Brazil/West",
+        "Pacific/Galapagos",
+        "Pacific/Tarawa",
+        "Pacific/Kiritimati",
+        "Africa/Nairobi",
+        "Africa/Kampala",
+        "Africa/Mogadishu",
+        "Africa/Kinshasa",
+        "Africa/Lubumbashi",
+        "Africa/Brazzaville",
+        "Africa/Libreville",
+        "Africa/Malabo",
+        "Africa/Sao_Tome",
+        "Indian/Maldives",
+        "Asia/Jakarta",
+        "Asia/Pontianak",
+        "Asia/Makassar",
+        "Asia/Ujung_Pandang",
+        "Asia/Jayapura",
+    ];
+
     /// Effect for a 1-based month; the south shifts six months. Months
     /// outside 1..=12 wrap.
     pub fn effect_for(month: u32, south: bool) -> EffectKind {
@@ -113,18 +236,31 @@ pub mod season {
         list.iter().any(|z| z.eq_ignore_ascii_case(base))
     }
 
+    fn exact(id: &str, list: &[&str]) -> bool {
+        list.iter().any(|z| z.eq_ignore_ascii_case(id))
+    }
+
+    /// IANA south rules. Every entry contains a `/`, which no Windows id
+    /// does, so Windows ids never match here.
+    fn iana_south(id: &str) -> bool {
+        let prefixed = IANA_SOUTH_PREFIX.iter().any(|p| id.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p)));
+        prefixed || exact(id, &IANA_SOUTH) || exact(id, &IANA_SOUTH_ISLANDS)
+    }
+
     /// Southern hemisphere? Frostpane prefers the chosen city's latitude;
-    /// without a city it uses the Windows time-zone id lists from 2.5.
-    /// A non-finite city latitude counts as no city.
+    /// without a city it uses the Windows time-zone id lists from 2.5, or
+    /// the IANA equivalents (macOS/Linux, porting design 1.6): zones wholly
+    /// in the south give true, zones straddling the equator use
+    /// `region_latitude`. A non-finite city latitude counts as no city.
     pub fn is_south(city_latitude: Option<f64>, tz_id: &str, region_latitude: Option<f64>) -> bool {
         if let Some(lat) = city_latitude.filter(|l| l.is_finite()) {
             return lat < 0.0;
         }
         let id = tz_id.trim();
-        if named(id, &SOUTH) {
+        if named(id, &SOUTH) || iana_south(id) {
             return true;
         }
-        let split = named(id, &SPLIT) || SPLIT_FULL.iter().any(|z| z.eq_ignore_ascii_case(id));
+        let split = named(id, &SPLIT) || exact(id, &SPLIT_FULL) || exact(id, &IANA_SPLIT);
         split && region_latitude.is_some_and(|l| l < 0.0)
     }
 }
