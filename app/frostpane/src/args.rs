@@ -1,4 +1,5 @@
-//! Command line (core-app 2.1 step 1): `--quiet`, `--seconds N`.
+//! Command line (core-app 2.1 step 1): `--quiet`, `--seconds N`, and
+//! `--updated [old version]` from the in-app updater.
 
 /// Parsed command line.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -7,6 +8,9 @@ pub struct Args {
     pub quiet: bool,
     /// Exit by itself after this many seconds (smoke runs).
     pub seconds: Option<f64>,
+    /// Started by an update: wait for the old copy to let go of the
+    /// single-instance lock instead of exiting as a second launch.
+    pub updated: bool,
 }
 
 /// Parse the arguments after the program name. Unknown flags are ignored; a
@@ -24,6 +28,12 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Args {
             i += 1;
         } else if let Some(s) = a.strip_prefix("--seconds=") {
             out.seconds = number(s);
+        } else if a == "--updated" {
+            out.updated = true;
+            // The old version may follow; it is informational only.
+            if v.get(i + 1).is_some_and(|n| !n.starts_with("--")) {
+                i += 1;
+            }
         }
         i += 1;
     }
@@ -52,10 +62,14 @@ mod tests {
     #[test]
     fn flags() {
         assert_eq!(p(&[]), Args::default());
-        assert_eq!(p(&["--quiet"]), Args { quiet: true, seconds: None });
-        assert_eq!(p(&["--seconds", "2.5", "--quiet"]), Args { quiet: true, seconds: Some(2.5) });
+        assert_eq!(p(&["--quiet"]), Args { quiet: true, ..Args::default() });
+        assert_eq!(p(&["--seconds", "2.5", "--quiet"]), Args { quiet: true, seconds: Some(2.5), updated: false });
         assert_eq!(p(&["--seconds=7"]).seconds, Some(7.0));
         assert!(p(&["--other", "--quiet"]).quiet);
+        // The updater's flag, with or without the old version.
+        assert_eq!(p(&["--updated", "1.1.4", "--quiet"]), Args { quiet: true, seconds: None, updated: true });
+        assert_eq!(p(&["--updated", "--quiet"]), Args { quiet: true, seconds: None, updated: true });
+        assert!(p(&["--updated"]).updated);
     }
 
     #[test]

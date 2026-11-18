@@ -11,7 +11,9 @@
 //!
 //! Flags: `--quiet` start in the tray without the window (once onboarding is
 //! done); `--seconds N` exit by itself after N seconds (smoke runs);
-//! `--open-picker` open the decoration picker one second after start.
+//! `--open-picker` open the decoration picker one second after start;
+//! `--updated [version]` started by the in-app updater (waits for the old
+//! copy's single-instance lock, see `updater.rs`).
 //! Environment: `FROSTPANE_DATA_DIR` overrides the data folder (tests);
 //! `FROSTPANE_LOG` sets the log level.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -29,6 +31,7 @@ mod packs;
 mod platform;
 mod react;
 mod sources;
+mod updater;
 mod wallpaper;
 
 use crate::core::{Config, Core};
@@ -48,6 +51,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 const DRIVER_MS: u32 = 10;
 /// A start within this long after boot counts as "at login" (core-app 2.1).
 const LOGIN_UPTIME_MS: u64 = 300_000;
+/// How long a copy started by an update waits for the old one to exit.
+const UPDATED_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The eframe app: a thin shell around [`Core`].
 struct Host {
@@ -84,6 +89,23 @@ fn data_dir(os: &dyn Services) -> PathBuf {
     std::env::var_os("FROSTPANE_DATA_DIR").map(PathBuf::from).unwrap_or_else(|| os.data_dir())
 }
 
+/// The single-instance lock. A copy started by an update waits (quietly)
+/// for the old copy to exit instead of treating itself as a second launch.
+fn claim_instance(os: &dyn Services, args: args::Args) -> Instance {
+    if !args.updated {
+        return os.single_instance(args.quiet);
+    }
+    let until = std::time::Instant::now() + UPDATED_WAIT;
+    loop {
+        match os.single_instance(true) {
+            Instance::Second if std::time::Instant::now() < until => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            other => return other,
+        }
+    }
+}
+
 /// System uptime below 5 minutes counts as a start at login.
 fn at_login(os: &dyn Services) -> bool {
     os.uptime_ms() < LOGIN_UPTIME_MS
@@ -108,13 +130,15 @@ fn main() -> eframe::Result {
     let os = backend.services.clone();
     os.init_process();
 
-    let instance = match os.single_instance(args.quiet) {
+    let instance = match claim_instance(&*os, args) {
         Instance::First(i) => i,
         Instance::Second => {
             println!("frostpane: already running");
             return Ok(());
         }
     };
+    // No older copy runs now: drop what an earlier update left behind.
+    updater::clean_leftovers();
 
     let dir = data_dir(&*os);
     let mut rng = Lcg64::new(mix_seed(std::process::id().into()));

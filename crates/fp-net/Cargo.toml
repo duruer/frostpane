@@ -1,6 +1,6 @@
 [package]
 name = "fp-net"
-description = "Frostpane networking: Open-Meteo and GitHub release checks over blocking HTTPS on a worker thread."
+description = "Frostpane networking: Open-Meteo and GitHub release checks and verified-release downloads over blocking HTTPS on worker threads."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,7 @@ fp-sources.workspace = true
 ureq.workspace = true
 native-tls.workspace = true
 log.workspace = true
+sha2 = "0.10.9"
 
 [lints]
 workspace = true

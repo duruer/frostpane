@@ -4,7 +4,8 @@
 //! 2.3 replaced by Open-Meteo (README open question 3), 2.4 random pick,
 //! 2.5 season table + hemisphere, 2.6 battery (in `fp_core::settings`),
 //! 7 parameters; other-weather 2.6 DayAndNight slot schedule; core-app 2.11
-//! update notice (GitHub releases, notice only); snowman-fight 2.1 /
+//! update notice (GitHub releases) and the in-app updater's decisions
+//! ([`install`]: asset choice, signed checksums, download URL rule); snowman-fight 2.1 /
 //! social 2.13 are NOT here (DailyVisits lives in `fp-characters`).
 //!
 //! Network I/O is behind [`Fetch`]; `fp-net` implements it with ureq on a
@@ -535,21 +536,35 @@ pub mod daynight {
     }
 }
 
-/// GitHub "latest release" parsing for the update notice (never installs).
+/// GitHub "latest release" parsing for the update notice and the in-app
+/// updater ([`install`] picks and verifies the files).
 pub mod update {
     use serde_json::Value;
 
     /// Seconds between update prompts (24 h).
     pub const ASK_EVERY_S: i64 = 86_400;
 
+    /// One file attached to a release.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct Asset {
+        pub name: String,
+        /// `browser_download_url`.
+        pub url: String,
+        /// Bytes, as GitHub reports them (0 when unknown).
+        pub size: u64,
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct Release {
         pub tag: String,
+        /// The release page (`html_url`), also the "release notes" link.
         pub url: String,
+        pub assets: Vec<Asset>,
     }
 
-    /// Parse `{tag_name, html_url}`. Both must be non-empty strings, the URL
-    /// must be https, and drafts/prereleases are ignored.
+    /// Parse `{tag_name, html_url, assets}`. Tag and URL must be non-empty
+    /// strings, the URL must be https, and drafts/prereleases are ignored.
+    /// Assets without a name or URL are skipped; a missing list is empty.
     pub fn parse_latest(json: &str) -> Option<Release> {
         let root: Value = serde_json::from_str(json).ok()?;
         let flag = |k: &str| root.get(k).and_then(Value::as_bool).unwrap_or(false);
@@ -561,7 +576,19 @@ pub mod update {
         if tag.is_empty() || !url.starts_with("https://") {
             return None;
         }
-        Some(Release { tag: tag.to_string(), url: url.to_string() })
+        let assets = root
+            .get("assets")
+            .and_then(Value::as_array)
+            .map(|list| list.iter().filter_map(asset).collect())
+            .unwrap_or_default();
+        Some(Release { tag: tag.to_string(), url: url.to_string(), assets })
+    }
+
+    fn asset(v: &Value) -> Option<Asset> {
+        let name = v.get("name")?.as_str()?.to_string();
+        let url = v.get("browser_download_url")?.as_str()?.to_string();
+        let size = v.get("size").and_then(Value::as_u64).unwrap_or(0);
+        Some(Asset { name, url, size })
     }
 
     /// True when the release is newer than `current` (`fp_core::version`).
@@ -584,6 +611,8 @@ pub mod update {
         }
     }
 }
+
+pub mod install;
 
 #[cfg(test)]
 mod tests;

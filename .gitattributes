@@ -1,0 +1,3 @@
+# Signed fixtures and the release public key must keep their exact bytes.
+crates/fp-sources/testdata/** -text
+packaging/minisign.pub -text

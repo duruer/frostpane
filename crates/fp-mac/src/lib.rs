@@ -17,6 +17,8 @@ pub mod logic;
 
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+pub mod update;
 
 #[cfg(target_os = "macos")]
 pub use mac::backend;

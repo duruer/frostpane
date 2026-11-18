@@ -295,6 +295,24 @@ fn release_parsing() {
     assert_eq!(r.tag, "v1.2.3");
     assert!(update::is_newer(&r, "1.2.2"));
     assert!(!update::is_newer(&r, "1.2.3"));
+    assert!(r.assets.is_empty());
+    let with = r#"{"tag_name":"v2","html_url":"https://a","assets":[
+        {"name":"a.zip","browser_download_url":"https://b/a.zip","size":12},
+        {"name":"b.zip","browser_download_url":"https://b/b.zip"},
+        {"name":"c.zip"},
+        {"browser_download_url":"https://b/d.zip"},
+        7
+    ]}"#;
+    let r = update::parse_latest(with).unwrap();
+    assert_eq!(
+        r.assets,
+        vec![
+            update::Asset { name: "a.zip".into(), url: "https://b/a.zip".into(), size: 12 },
+            update::Asset { name: "b.zip".into(), url: "https://b/b.zip".into(), size: 0 },
+        ]
+    );
+    let odd = update::parse_latest(r#"{"tag_name":"v2","html_url":"https://a","assets":{}}"#).unwrap();
+    assert!(odd.assets.is_empty());
     for bad in [
         "x",
         "{}",

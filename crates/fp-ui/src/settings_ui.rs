@@ -401,13 +401,16 @@ impl Shell {
             });
         }
 
+        // Automatic updates only where this copy can replace itself; it is
+        // then the last row.
+        let auto = self.host.update_manual.is_none();
         self.switch_row(
             ui,
             self.t(Key::SetOften),
             Some(self.t(Key::SetOftenDetail)),
             s.often_visits,
             0.0,
-            !self.host.has_battery,
+            !self.host.has_battery && !auto,
             UiAction::SetOftenVisits,
         );
         if self.host.has_battery {
@@ -417,8 +420,19 @@ impl Shell {
                 Some(self.t(Key::SetBatteryDetail)),
                 s.pause_on_battery,
                 0.0,
-                true,
+                !auto,
                 UiAction::SetPauseOnBattery,
+            );
+        }
+        if auto {
+            self.switch_row(
+                ui,
+                self.t(Key::SetAutoUpdate),
+                Some(self.t(Key::SetAutoUpdateDetail)),
+                s.auto_update,
+                0.0,
+                true,
+                UiAction::SetAutoUpdate,
             );
         }
         let _ = tk;

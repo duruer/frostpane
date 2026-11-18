@@ -1,14 +1,18 @@
-//! HTTPS client for Open-Meteo (forecast + geocoding) and the GitHub
-//! "latest release" notice. Not part of the coverage gate.
+//! HTTPS client for Open-Meteo (forecast + geocoding), the GitHub "latest
+//! release" check and the in-app updater's downloads ([`Downloader`]). Not
+//! part of the coverage gate.
 //!
 //! Spec: weather-sources 2.3 (fetch, 20 s timeout, failures change nothing),
-//! core-app 2.11 (update check: 20 s after start, then every 4 h, notice
-//! only, never downloads or installs).
+//! core-app 2.11 (update check: 20 s after start, then every 4 h).
 //!
-//! All calls block, so the app runs them on one worker thread ([`Worker`])
-//! and posts the results back to the UI thread.
+//! All calls block, so the app runs them on worker threads ([`Worker`], the
+//! updater's own thread) and posts the results back to the UI thread.
 
 use fp_sources::Fetch;
+use fp_sources::install::Download;
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -25,13 +29,127 @@ pub struct Http {
 
 impl Default for Http {
     fn default() -> Self {
-        let tls = native_tls::TlsConnector::new().map_err(|e| log::warn!("TLS init failed: {e}")).ok();
-        let mut b =
-            ureq::AgentBuilder::new().timeout(TIMEOUT).user_agent(concat!("Frostpane/", env!("CARGO_PKG_VERSION")));
-        if let Some(t) = tls {
-            b = b.tls_connector(Arc::new(t));
+        Self { agent: tls_agent(ureq::AgentBuilder::new().timeout(TIMEOUT)) }
+    }
+}
+
+/// `b` with the user agent and Windows TLS (schannel through native-tls).
+fn tls_agent(b: ureq::AgentBuilder) -> ureq::Agent {
+    let b = b.user_agent(concat!("Frostpane/", env!("CARGO_PKG_VERSION")));
+    match native_tls::TlsConnector::new() {
+        Ok(t) => b.tls_connector(Arc::new(t)).build(),
+        Err(e) => {
+            log::warn!("TLS init failed: {e}");
+            b.build()
         }
-        Self { agent: b.build() }
+    }
+}
+
+/// Redirects followed per download.
+const MAX_REDIRECTS: usize = 5;
+/// No byte for this long ends a download.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Release downloads for the updater. Redirects are followed by hand so
+/// every hop passes the URL rule (`fp_sources::install::download_allowed`);
+/// bodies are capped and hashed while they stream.
+pub struct Downloader {
+    agent: ureq::Agent,
+    allowed: fn(&str) -> bool,
+}
+
+impl Downloader {
+    /// With the release URL rule.
+    pub fn release() -> Self {
+        Self::with_rule(fp_sources::install::download_allowed)
+    }
+
+    /// With any URL rule (tests use loopback http).
+    pub fn with_rule(allowed: fn(&str) -> bool) -> Self {
+        let b = ureq::AgentBuilder::new().redirects(0).timeout_connect(TIMEOUT).timeout_read(READ_TIMEOUT);
+        Self { agent: tls_agent(b), allowed }
+    }
+
+    /// GET `url`, following up to [`MAX_REDIRECTS`] allowed redirects.
+    fn open(&self, url: &str) -> Result<ureq::Response, String> {
+        let mut at = url.to_string();
+        for _ in 0..=MAX_REDIRECTS {
+            if !(self.allowed)(&at) {
+                return Err(format!("refused URL: {at}"));
+            }
+            let resp = self.agent.get(&at).call().map_err(|e| e.to_string())?;
+            if !(300..400).contains(&resp.status()) {
+                return Ok(resp);
+            }
+            let next = resp.header("location").ok_or("redirect without a location")?;
+            at = resolve(&at, next);
+        }
+        Err("too many redirects".into())
+    }
+
+    /// Streams the body of `url` to `out`, at most `max` bytes, and returns
+    /// its SHA-256.
+    fn pump(
+        &self,
+        url: &str,
+        max: u64,
+        out: &mut dyn Write,
+        progress: &mut dyn FnMut(u64),
+    ) -> Result<[u8; 32], String> {
+        let resp = self.open(url)?;
+        if let Some(len) = resp.header("content-length").and_then(|v| v.trim().parse::<u64>().ok())
+            && len > max
+        {
+            return Err(format!("{url}: {len} bytes is more than the {max} allowed"));
+        }
+        let mut body = resp.into_reader().take(max + 1);
+        let mut hash = Sha256::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total = 0u64;
+        loop {
+            let n = body.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            total += n as u64;
+            if total > max {
+                return Err(format!("{url}: more than the {max} bytes allowed"));
+            }
+            hash.update(&buf[..n]);
+            out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            progress(total);
+        }
+        Ok(hash.finalize().into())
+    }
+}
+
+/// `next` (a Location header) relative to `base`.
+fn resolve(base: &str, next: &str) -> String {
+    if next.contains("://") {
+        return next.to_string();
+    }
+    let scheme_end = base.find("://").map_or(0, |i| i + 3);
+    let host_end = base[scheme_end..].find('/').map_or(base.len(), |i| scheme_end + i);
+    if next.starts_with('/') {
+        format!("{}{next}", &base[..host_end])
+    } else {
+        let dir = base[host_end..].rfind('/').map_or(host_end, |i| host_end + i);
+        format!("{}/{next}", &base[..dir])
+    }
+}
+
+impl Download for Downloader {
+    fn bytes(&self, url: &str, max: u64) -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        self.pump(url, max, &mut out, &mut |_| {})?;
+        Ok(out)
+    }
+
+    fn file(&self, url: &str, dest: &Path, max: u64, progress: &mut dyn FnMut(u64)) -> Result<[u8; 32], String> {
+        let mut f = std::fs::File::create(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+        let hash = self.pump(url, max, &mut f, progress)?;
+        f.sync_all().map_err(|e| e.to_string())?;
+        Ok(hash)
     }
 }
 
@@ -269,6 +387,96 @@ mod tests {
         assert!(!url_allowed("http://127.0.0.1@evil.com/x"));
         let e = Http::default().get("http://example.com/").unwrap_err();
         assert!(e.contains("non-https"), "{e}");
+    }
+
+    /// Serves `routes` (path, raw response) to any number of connections
+    /// until the test process ends.
+    fn serve_many(routes: &'static [(&'static str, &'static str)]) -> String {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for s in l.incoming() {
+                let Ok(mut s) = s else { break };
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req.split_whitespace().nth(1).unwrap_or("/");
+                let resp = routes.iter().find(|(p, _)| *p == path).map_or(NOT_FOUND, |r| r.1);
+                let _ = s.write_all(resp.as_bytes());
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn loopback_only(u: &str) -> bool {
+        url_allowed(u) && !u.contains("example.com")
+    }
+
+    const NOT_FOUND: &str = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    const ROUTES: &[(&str, &str)] = &[
+        ("/data", "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\npayload"),
+        ("/redir", "HTTP/1.1 302 Found\r\nLocation: /data\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+        ("/sub/rel", "HTTP/1.1 302 Found\r\nLocation: ../data\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+        (
+            "/evil",
+            "HTTP/1.1 302 Found\r\nLocation: http://example.com/x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        ),
+        ("/loop", "HTTP/1.1 301 Moved\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+        ("/nowhere", "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+        ("/huge", "HTTP/1.1 200 OK\r\nContent-Length: 999999\r\nConnection: close\r\n\r\nabc"),
+        (
+            "/chunked",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n7\r\npayload\r\n0\r\n\r\n",
+        ),
+    ];
+
+    /// SHA-256 of b"payload".
+    const PAYLOAD_SHA: &str = "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5";
+
+    #[test]
+    fn downloads_follow_allowed_redirects_only() {
+        let base = serve_many(ROUTES);
+        let d = Downloader::with_rule(loopback_only);
+        assert_eq!(d.bytes(&format!("{base}/data"), 100).unwrap(), b"payload");
+        assert_eq!(d.bytes(&format!("{base}/redir"), 100).unwrap(), b"payload");
+        // A relative location ("../data" from /sub/rel).
+        assert_eq!(d.bytes(&format!("{base}/sub/rel"), 100).unwrap(), b"payload");
+        assert!(d.bytes(&format!("{base}/missing"), 100).unwrap_err().contains("404"));
+        let e = d.bytes(&format!("{base}/evil"), 100).unwrap_err();
+        assert!(e.contains("refused URL: http://example.com/x"), "{e}");
+        assert!(d.bytes(&format!("{base}/loop"), 100).unwrap_err().contains("too many redirects"));
+        assert!(d.bytes(&format!("{base}/nowhere"), 100).unwrap_err().contains("location"));
+        // The release rule refuses loopback outright.
+        assert!(Downloader::release().bytes(&format!("{base}/data"), 100).unwrap_err().contains("refused"));
+    }
+
+    #[test]
+    fn downloads_are_capped_and_hashed() {
+        let base = serve_many(ROUTES);
+        let d = Downloader::with_rule(loopback_only);
+        assert!(d.bytes(&format!("{base}/huge"), 100).unwrap_err().contains("allowed"));
+        // No length header: the stream itself is cut.
+        assert!(d.bytes(&format!("{base}/chunked"), 6).unwrap_err().contains("allowed"));
+        assert_eq!(d.bytes(&format!("{base}/chunked"), 7).unwrap(), b"payload");
+        let dir = std::env::temp_dir().join(format!("fp-net-dl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("f.zip");
+        let mut seen = Vec::new();
+        let hash = d.file(&format!("{base}/redir"), &dest, 7, &mut |n| seen.push(n)).unwrap();
+        assert_eq!(fp_sources::install::hex(&hash), PAYLOAD_SHA);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"payload");
+        assert_eq!(seen.last(), Some(&7));
+        assert!(d.file(&format!("{base}/data"), &dir.join("no/such/dir"), 7, &mut |_| {}).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locations_resolve() {
+        assert_eq!(resolve("https://a/b/c", "https://x/y"), "https://x/y");
+        assert_eq!(resolve("https://a/b/c", "/y"), "https://a/y");
+        assert_eq!(resolve("https://a/b/c", "y"), "https://a/b/y");
+        assert_eq!(resolve("https://a", "/y"), "https://a/y");
+        assert_eq!(resolve("https://a", "y"), "https://a/y");
     }
 
     #[test]

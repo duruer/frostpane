@@ -37,7 +37,7 @@ pub mod tween;
 pub mod wallpapers;
 pub mod widgets;
 
-pub use cards::{CardAction, CardCtx, Cards};
+pub use cards::{CardAction, CardCtx, Cards, UpdateFail, UpdatePhase};
 pub use shell::{Decoder, HostInfo, Notices, Shell, UiAction, UpdateLine};
 pub use tray::Tray;
 

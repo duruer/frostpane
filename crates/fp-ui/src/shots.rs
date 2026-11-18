@@ -24,7 +24,7 @@
 use crate::cardmodel::CityState;
 use crate::model::{DisplayInfo, Pane, Tab};
 use crate::shell::{HostInfo, LoginNote, Notices, Shell, UiAction, UpdateLine};
-use crate::{CardCtx, Cards};
+use crate::{CardCtx, Cards, UpdateFail, UpdatePhase};
 use eframe::egui::{self, Color32, Pos2, Rect, Shape, Vec2, vec2};
 use egui_kittest::Harness;
 use fp_core::clock::WallTime;
@@ -32,7 +32,7 @@ use fp_core::desktop::{Layout, MonitorInfo};
 use fp_core::effect::{EffectKind, Lang};
 use fp_core::geom::{Frame, PixelRect, Vec2 as GVec2};
 use fp_core::settings::{City, Settings, Weathers};
-use fp_text::Key;
+use fp_text::{Key, ManualReason};
 use fp_world::CardRequest;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -68,6 +68,8 @@ struct World {
 /// the needle, moved by `offset`.
 struct Poke {
     click: bool,
+    /// Mouse wheel points to scroll there (0: none; negative scrolls down).
+    wheel: f32,
     needle: Rc<dyn Fn(Lang) -> String>,
     offset: Vec2,
 }
@@ -88,18 +90,24 @@ impl Scene {
 
     /// Move the pointer over a text (the picture keeps the cursor).
     fn hover(mut self, needle: impl Fn(Lang) -> String + 'static, offset: Vec2) -> Self {
-        self.pokes.push(Poke { click: false, needle: Rc::new(needle), offset });
+        self.pokes.push(Poke { click: false, wheel: 0.0, needle: Rc::new(needle), offset });
         self
     }
 
     /// Click a text.
     fn click(mut self, needle: impl Fn(Lang) -> String + 'static) -> Self {
-        self.pokes.push(Poke { click: true, needle: Rc::new(needle), offset: Vec2::ZERO });
+        self.pokes.push(Poke { click: true, wheel: 0.0, needle: Rc::new(needle), offset: Vec2::ZERO });
+        self
+    }
+
+    /// Scroll the mouse wheel by `dy` points over a text.
+    fn wheel(mut self, needle: impl Fn(Lang) -> String + 'static, dy: f32) -> Self {
+        self.pokes.push(Poke { click: false, wheel: dy, needle: Rc::new(needle), offset: Vec2::ZERO });
         self
     }
 
     fn hovers(&self) -> bool {
-        self.pokes.iter().any(|p| !p.click)
+        self.pokes.iter().any(|p| !p.click && p.wheel == 0.0)
     }
 
     fn frames(mut self, n: usize) -> Self {
@@ -372,6 +380,11 @@ fn scenes() -> Vec<Scene> {
     for (name, p) in panes {
         v.push(Scene::new("settings", name, HOME, move |l| home_world(l, Tab::Settings, |sh, _| sh.show_pane(p))));
     }
+    // The end of the General pane: the automatic-updates switch.
+    v.push(
+        Scene::new("settings", "general-bottom", HOME, |l| home_world(l, Tab::Settings, |_, s| s.auto_update = true))
+            .wheel(|l| fp_text::t(l, Key::SetSnowballs).to_string(), -3000.0),
+    );
     v.push(
         Scene::new("settings", "general-language-popup", HOME, |l| home_world(l, Tab::Settings, |_, _| {}))
             .click(|l| l.native_name().to_string()),
@@ -554,6 +567,24 @@ fn scenes() -> Vec<Scene> {
     v.push(Scene::new("card", "update", CARD, |l| {
         card_world(l, |c, cx| c.open_update("9.9.9", "https://example.org/release", cx, 0.0))
     }));
+    // The in-app install: progress, restart, failure, and a copy that can
+    // only point at the download page.
+    let phases: [(&str, UpdatePhase, Option<ManualReason>); 5] = [
+        ("downloading", UpdatePhase::Downloading { done: 4_200_000, total: 7_000_000 }, None),
+        ("restarting", UpdatePhase::Restarting, None),
+        ("failed", UpdatePhase::Failed(UpdateFail::Verify), None),
+        ("manual-package", UpdatePhase::Offer, Some(ManualReason::Package)),
+        ("manual-failed", UpdatePhase::Failed(UpdateFail::Network), Some(ManualReason::Folder)),
+    ];
+    for (name, phase, manual) in phases {
+        v.push(Scene::new("card", format!("update-{name}"), CARD, move |l| {
+            card_world(l, |c, cx| {
+                c.set_update_manual(manual);
+                c.set_update_phase(phase);
+                c.open_update("9.9.9", "https://example.org/release", cx, 0.0);
+            })
+        }));
+    }
     v.push(Scene::new("card", "decor-menu", CARD, |l| {
         card_world(l, |c, cx| c.open_menu(3, fp_text::t(l, Key::DecorTakeDown), cx, 0.0))
     }));
@@ -667,6 +698,17 @@ fn run(scene: &Scene, lang: Lang, gpu: bool) -> (Harness<'static, World>, BTreeS
             continue;
         };
         h.hover_at(pos);
+        if poke.wheel != 0.0 {
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, poke.wheel),
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.step();
+            h.event(egui::Event::PointerGone);
+        }
         if poke.click {
             h.step();
             let press = |pressed| egui::Event::PointerButton {

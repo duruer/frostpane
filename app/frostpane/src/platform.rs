@@ -67,3 +67,15 @@ pub fn select() -> Result<Backend, String> {
 pub fn select() -> Result<Backend, String> {
     Err("this platform is not supported".into())
 }
+
+/// The in-app updater's unpack and relaunch steps for this OS.
+pub fn updater() -> Option<std::sync::Arc<dyn fp_platform::update::Updater>> {
+    #[cfg(windows)]
+    return Some(std::sync::Arc::new(fp_win::update::WinUpdater));
+    #[cfg(target_os = "macos")]
+    return Some(std::sync::Arc::new(fp_mac::update::MacUpdater));
+    #[cfg(target_os = "linux")]
+    return Some(std::sync::Arc::new(fp_linux::update::LinuxUpdater));
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    None
+}
