@@ -88,7 +88,10 @@ pub struct SnowSprite {
     pub lump: f32,
 }
 
-/// Falling flake evaluated in closed form on the GPU (snow-sim 3.3), 52 bytes.
+/// Falling flake evaluated in closed form on the GPU (snow-sim 3.3), 64 bytes.
+/// `shape`, `spin` and `wobble` are visual only: shape kind (0 speck, 1 clump,
+/// 2 crystal, 3 bokeh) plus a seed in the fraction, spin in rad/s and the
+/// flutter depth of the tumble.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct SnowFlake {
@@ -105,6 +108,9 @@ pub struct SnowFlake {
     pub alpha: f32,
     pub soft: f32,
     pub gone: f32,
+    pub shape: f32,
+    pub spin: f32,
+    pub wobble: f32,
 }
 
 const _: () = assert!(size_of::<RainStroke>() == 32);
@@ -114,7 +120,7 @@ const _: () = assert!(size_of::<StarSprite>() == 24);
 const _: () = assert!(size_of::<StarTrail>() == 28);
 const _: () = assert!(size_of::<FireflySprite>() == 24);
 const _: () = assert!(size_of::<SnowSprite>() == 32);
-const _: () = assert!(size_of::<SnowFlake>() == 52);
+const _: () = assert!(size_of::<SnowFlake>() == 64);
 
 /// Colour blending of a pass. All shaders output premultiplied colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
