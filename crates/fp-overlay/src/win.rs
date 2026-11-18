@@ -413,6 +413,8 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
     let mut next = epoch;
     let (mut main_list, mut above_list) = (DrawList::default(), DrawList::default());
     let mut paused = false;
+    let stats_on = log::log_enabled!(log::Level::Debug);
+    let mut stats = plan::FrameStats::new(0.0);
     while !sh.stop.load(Ordering::Relaxed) {
         {
             let run = lock(&sh.run);
@@ -425,6 +427,7 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
         if paused {
             paused = false;
             timer.reset();
+            stats.pause();
             next = Instant::now();
         }
         let now = Instant::now();
@@ -436,6 +439,7 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
         let dt = timer.tick(time);
         let work = prepare(&sh, dt, time, &mut main_list, &mut above_list);
         if work.main == Job::Idle && work.above.is_none() {
+            stats.pause();
             std::thread::sleep(Duration::from_millis(50));
             next = Instant::now();
             continue;
@@ -443,6 +447,7 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
         if work.main == Job::Draw {
             gpu.warm_families(&main_list);
         }
+        let prepared = epoch.elapsed().as_secs_f64();
         let list = match work.main {
             Job::Draw => Some(&main_list),
             _ => None,
@@ -454,6 +459,22 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
             // The above panel has the main panel's size (3.3).
             let list = (job == Job::Draw).then_some(&above_list);
             present(&gpu, &gate, &mut slots, &target, swap, list);
+        }
+        if stats_on {
+            let done = epoch.elapsed().as_secs_f64();
+            stats.frame(time, prepared - time, done - prepared, frame_time.as_secs_f64());
+            if let Some(r) = stats.report(done) {
+                log::debug!(
+                    "overlay frames: {} ({:.1} fps), gap avg {:.2} ms max {:.2} ms, {} late; prepare {:.3} ms, present {:.3} ms",
+                    r.frames,
+                    r.fps,
+                    r.gap_avg_ms,
+                    r.gap_max_ms,
+                    r.late,
+                    r.prepare_ms,
+                    r.present_ms
+                );
+            }
         }
     }
 }
