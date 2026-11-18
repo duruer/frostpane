@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "fp-characters"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-paint",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "fp-core"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1395,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "fp-decor"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-paint",
@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "fp-fight"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-paint",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "fp-layered"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-paint",
@@ -1426,7 +1426,7 @@ dependencies = [
 
 [[package]]
 name = "fp-linux"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-platform",
  "libc",
@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "fp-mac"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-platform",
  "libc",
@@ -1444,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "fp-net"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-sources",
@@ -1455,7 +1455,7 @@ dependencies = [
 
 [[package]]
 name = "fp-overlay"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "bytemuck",
  "fp-core",
@@ -1475,7 +1475,7 @@ dependencies = [
 
 [[package]]
 name = "fp-paint"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "tiny-skia 0.12.0",
@@ -1483,14 +1483,14 @@ dependencies = [
 
 [[package]]
 name = "fp-petals"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
 ]
 
 [[package]]
 name = "fp-platform"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-tracker",
@@ -1500,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "fp-rain"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "bytemuck",
  "fp-core",
@@ -1508,21 +1508,21 @@ dependencies = [
 
 [[package]]
 name = "fp-sky"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
 ]
 
 [[package]]
 name = "fp-snow"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
 ]
 
 [[package]]
 name = "fp-snowballs"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-paint",
@@ -1533,7 +1533,7 @@ dependencies = [
 
 [[package]]
 name = "fp-snowman"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-paint",
@@ -1543,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "fp-sources"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "serde",
@@ -1552,21 +1552,21 @@ dependencies = [
 
 [[package]]
 name = "fp-text"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
 ]
 
 [[package]]
 name = "fp-tracker"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
 ]
 
 [[package]]
 name = "fp-trees"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-paint",
@@ -1576,7 +1576,7 @@ dependencies = [
 
 [[package]]
 name = "fp-ui"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "eframe",
  "egui_kittest",
@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "fp-wayland"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-linux",
  "fp-platform",
@@ -1612,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "fp-win"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-platform",
@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "fp-world"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-characters",
  "fp-core",
@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "fp-x11"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-linux",
  "fp-platform",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "frostpane"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "fp-core",
  "fp-decor",

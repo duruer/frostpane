@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4](https://github.com/duruer/frostpane/compare/v1.1.3...v1.1.4) (2026-11-18)
+
+
+### Bug Fixes
+
+* keep the window size when dragging it between monitors ([db78768](https://github.com/duruer/frostpane/commit/db787687e61f86b0481acf909bb68e5ffc153ffd))
+
 ## [1.1.3](https://github.com/duruer/frostpane/compare/v1.1.2...v1.1.3) (2026-11-18)
 
 
