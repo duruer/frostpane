@@ -1,0 +1,14 @@
+[package]
+name = "fp-text"
+description = "Frostpane UI strings (own copy) for the 7 supported languages."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "fp-decor"
+description = "Frostpane desktop decorations: catalogue, placement, drag/resize, persistence, art."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+fp-paint.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

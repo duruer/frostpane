@@ -1,0 +1,65 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "app/frostpane"]
+exclude = []
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/duruer/frostpane"
+publish = false
+
+[workspace.dependencies]
+# internal crates
+fp-core = { path = "crates/fp-core" }
+fp-text = { path = "crates/fp-text" }
+fp-paint = { path = "crates/fp-paint" }
+fp-tracker = { path = "crates/fp-tracker" }
+fp-snow = { path = "crates/fp-snow" }
+fp-rain = { path = "crates/fp-rain" }
+fp-petals = { path = "crates/fp-petals" }
+fp-sky = { path = "crates/fp-sky" }
+fp-sources = { path = "crates/fp-sources" }
+fp-snowman = { path = "crates/fp-snowman" }
+fp-snowballs = { path = "crates/fp-snowballs" }
+fp-trees = { path = "crates/fp-trees" }
+fp-decor = { path = "crates/fp-decor" }
+fp-characters = { path = "crates/fp-characters" }
+fp-fight = { path = "crates/fp-fight" }
+fp-world = { path = "crates/fp-world" }
+fp-win = { path = "crates/fp-win" }
+fp-layered = { path = "crates/fp-layered" }
+fp-overlay = { path = "crates/fp-overlay" }
+fp-ui = { path = "crates/fp-ui" }
+fp-net = { path = "crates/fp-net" }
+
+# third party
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+tiny-skia = "0.12.0"
+wgpu = { version = "30.0.2", default-features = false, features = ["dx12", "wgsl"] }
+pollster = "1.0.2"
+eframe = "0.37.0"
+# headless UI screenshots (fp-ui dev only)
+egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot"] }
+egui_system_font_provider = { version = "0.37.0", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+tray-icon = "0.26.1"
+muda = "0.21.2"
+log = "0.4.35"
+ureq = { version = "2.12.1", default-features = false, features = ["native-tls", "json"] }
+native-tls = "0.2"
+windows = "0.62.2"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

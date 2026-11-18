@@ -1,0 +1,14 @@
+[package]
+name = "fp-sky"
+description = "Frostpane starfall and firefly simulations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+
+[lints]
+workspace = true

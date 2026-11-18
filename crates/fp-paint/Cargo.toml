@@ -1,0 +1,15 @@
+[package]
+name = "fp-paint"
+description = "Frostpane procedural 2D art helpers on tiny-skia: colours, Trace/Sketch, Strand, menu icons."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+tiny-skia.workspace = true
+
+[lints]
+workspace = true

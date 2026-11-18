@@ -1,0 +1,16 @@
+[package]
+name = "fp-core"
+description = "Frostpane shared core types: geometry, desktop layout, surfaces, settings, prefs, feed, draw lists. Platform-free."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+bytemuck.workspace = true
+
+[lints]
+workspace = true

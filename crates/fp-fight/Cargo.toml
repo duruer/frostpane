@@ -1,0 +1,16 @@
+[package]
+name = "fp-fight"
+description = "Frostpane snowman fights: story generator, moves, physics, art."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+fp-paint.workspace = true
+fp-snowman.workspace = true
+
+[lints]
+workspace = true

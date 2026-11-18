@@ -1,0 +1,44 @@
+[package]
+name = "frostpane"
+description = "Frostpane: weather on your desktop. Tray app binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "frostpane"
+path = "src/main.rs"
+
+[dependencies]
+fp-core.workspace = true
+fp-text.workspace = true
+fp-tracker.workspace = true
+fp-snow.workspace = true
+fp-rain.workspace = true
+fp-petals.workspace = true
+fp-sky.workspace = true
+fp-sources.workspace = true
+fp-world.workspace = true
+fp-win.workspace = true
+fp-layered.workspace = true
+fp-overlay.workspace = true
+fp-ui.workspace = true
+fp-net.workspace = true
+fp-paint.workspace = true
+jpeg-encoder = { version = "0.7.1", default-features = false, features = ["std"] }
+fp-decor.workspace = true
+log.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Imaging",
+  "Win32_System_Com",
+  "Win32_System_SystemInformation",
+] }
+
+[lints]
+workspace = true

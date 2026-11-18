@@ -1,0 +1,17 @@
+[package]
+name = "fp-rain"
+description = "Frostpane rain and thunderstorm simulation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+bytemuck.workspace = true

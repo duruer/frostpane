@@ -1,0 +1,18 @@
+[package]
+name = "fp-net"
+description = "Frostpane networking: Open-Meteo and GitHub release checks over blocking HTTPS on a worker thread."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+fp-sources.workspace = true
+ureq.workspace = true
+native-tls.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

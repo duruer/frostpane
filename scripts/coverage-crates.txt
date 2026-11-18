@@ -1,0 +1,21 @@
+# Pure crates held to 100% line coverage by scripts/coverage.ps1.
+# A crate joins this list in the same change that finishes its implementation
+# (no todo!() left). A crate in docs/ARCHITECTURE.md marked "pure" is not
+# done until it is listed here. Platform crates (fp-win, fp-layered,
+# fp-overlay, fp-ui, fp-net, frostpane) never appear here.
+fp-core
+fp-text
+fp-paint
+fp-tracker
+fp-snow
+fp-rain
+fp-petals
+fp-sky
+fp-sources
+fp-snowman
+fp-snowballs
+fp-trees
+fp-decor
+fp-characters
+fp-fight
+fp-world

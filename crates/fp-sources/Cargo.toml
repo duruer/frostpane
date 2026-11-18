@@ -1,0 +1,16 @@
+[package]
+name = "fp-sources"
+description = "Frostpane weather selection: random, season, Open-Meteo mapping, mode timers, day and night wallpaper schedule, update notice parsing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
