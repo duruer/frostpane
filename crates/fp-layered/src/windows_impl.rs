@@ -161,7 +161,7 @@ impl WinBackend {
         let new = if on { cur | bit } else { cur & !bit };
         if new != cur {
             // SAFETY: style change on our own window.
-            unsafe { SetWindowLongPtrW(h, GWL_EXSTYLE, new as isize) };
+            unsafe { SetWindowLongPtrW(h, GWL_EXSTYLE, new as _) };
         }
     }
 

@@ -50,3 +50,32 @@ jobs:
       - name: Coverage gate (pure crates, 100% lines)
         shell: pwsh
         run: ./scripts/coverage.ps1
+
+  build-targets:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: i686-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.99
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p frostpane
