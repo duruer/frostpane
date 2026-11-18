@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "app/frostpane"]
-exclude = []
+exclude = ["vendor"]
 
 [workspace.package]
 version = "1.0.0"
@@ -67,3 +67,10 @@ codegen-units = 4
 [profile.profiling]
 inherits = "release"
 debug = true
+
+# eframe 0.37.0 with one fix: invisible windows are painted from `new_events`
+# without the event loop context, so a card viewport opened while the main
+# window is hidden cannot create its window and egui panics. See
+# vendor/eframe/FROSTPANE.md. Drop this once upstream ships the fix.
+[patch.crates-io]
+eframe = { path = "vendor/eframe" }
