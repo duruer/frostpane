@@ -1,4 +1,5 @@
-//! Stand-ins for targets without a native backend yet. They never fail and
+//! Stand-ins for targets without a native backend, and the fallbacks a
+//! backend uses when its display connection fails. They never fail and
 //! never draw: sprite windows are bookkeeping only, the overlay reports
 //! itself unavailable, there are no hooks, no system events and no OS timer.
 //! Backend crates fill in what they already know (data folder, language,
@@ -16,7 +17,7 @@ use std::sync::mpsc::Sender;
 use tiny_skia::Pixmap;
 
 /// Error text of [`NullOverlay::create_panel`].
-pub const OVERLAY_UNAVAILABLE: &str = "overlay not yet supported on this platform";
+pub const OVERLAY_UNAVAILABLE: &str = "no overlay backend on this platform";
 
 /// `Platform` + `Shell` + `SystemEvents` + `Driver` without OS calls.
 #[derive(Clone, Debug)]
@@ -253,6 +254,7 @@ mod tests {
         b.present(id, 0, 0, 1);
         b.hide(id);
         b.set_click_through(id, true);
+        b.set_hit_mode(id, fp_core::scene::HitMode::Never);
         b.place(id, Place::Top);
         assert!(b.lowest_taskbar().is_none());
         assert!(!b.taskbar_above(id));
@@ -322,6 +324,8 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(o.alpha_mode(&caps), wgpu::CompositeAlphaMode::PostMultiplied);
+        assert_eq!(o.present_mode(&caps), wgpu::PresentMode::Fifo);
+        assert_eq!(o.swap_size(PixelRect::new(0, 0, 3840, 2160), (1920, 1080)), (1920, 1080));
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
         desc.backends = wgpu::Backends::empty();
         let inst = wgpu::Instance::new(desc);

@@ -28,18 +28,25 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// A panel window as the host keeps it.
 type PanelWin = Box<dyn PanelWindow>;
 
-fn surface_config(size: (u32, u32), alpha_mode: wgpu::CompositeAlphaMode) -> wgpu::SurfaceConfiguration {
+/// How every panel's swap chain is configured (one choice per host).
+#[derive(Clone, Copy, Debug)]
+struct Present {
+    alpha: wgpu::CompositeAlphaMode,
+    mode: wgpu::PresentMode,
+}
+
+fn surface_config(size: (u32, u32), p: Present) -> wgpu::SurfaceConfiguration {
     wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format: crate::gpu::FORMAT,
         width: size.0,
         height: size.1,
-        present_mode: wgpu::PresentMode::Fifo,
+        present_mode: p.mode,
         // Two swap chain buffers (desktop-native 3.2); wgpu adds one buffer
         // to the latency. Each extra full-screen buffer is 4 bytes a pixel of
         // committed memory on an integrated GPU.
         desired_maximum_frame_latency: 1,
-        alpha_mode,
+        alpha_mode: p.alpha,
         view_formats: vec![],
         color_space: Default::default(),
     }
@@ -93,9 +100,12 @@ struct Loop {
     size: (f32, f32),
     /// Swap chain size of the main (and above) panel.
     swap: (u32, u32),
+    /// Swap chain pixels per point when the backend sizes the swap chain
+    /// above the DIP size (X11); 1 otherwise. Scales the shaders' edge width.
+    px_per_pt: f32,
     pixels: PixelRect,
     scale: f64,
-    alpha: wgpu::CompositeAlphaMode,
+    present: Present,
 }
 
 impl Loop {
@@ -119,6 +129,7 @@ struct Work {
 fn prepare<B: OverlayBackend>(sh: &Loop, dt: f64, time: f64, main: &mut DrawList, above: &mut DrawList) -> Work {
     let cursor = cursor_now::<B>(sh);
     let (w, h) = sh.size;
+    let px = sh.px_per_pt;
     let mut guard = lock(&sh.gate);
     let Gate { fall, above: above_panel, above_cleared, main_dirty } = &mut *guard;
     let Some(fall) = fall else {
@@ -135,14 +146,14 @@ fn prepare<B: OverlayBackend>(sh: &Loop, dt: f64, time: f64, main: &mut DrawList
         fall.set_wind_time(wall.as_secs_f64());
     }
     fall.step(dt, cursor);
-    fill(main, w, h, time, |l| fall.draw(Layer::Main, l));
+    fill(main, w, h, time, px, |l| fall.draw(Layer::Main, l));
     *main_dirty = false;
     let above_job = above_panel.clone().and_then(|a| {
         let has = fall.has_above();
         if !has && *above_cleared {
             return None;
         }
-        fill(above, w, h, time, |l| fall.draw(Layer::Above, l));
+        fill(above, w, h, time, px, |l| fall.draw(Layer::Above, l));
         *above_cleared = !has;
         Some((a, Job::Draw))
     });
@@ -150,7 +161,9 @@ fn prepare<B: OverlayBackend>(sh: &Loop, dt: f64, time: f64, main: &mut DrawList
 }
 
 /// Resets a list to the panel's scene and lets the simulation draw into it.
-fn fill(list: &mut DrawList, w: f32, h: f32, time: f64, draw: impl FnOnce(&mut DrawList)) {
+/// `px` (swap chain pixels per point, see `Loop::px_per_pt`) multiplies the
+/// scene scale.
+fn fill(list: &mut DrawList, w: f32, h: f32, time: f64, px: f32, draw: impl FnOnce(&mut DrawList)) {
     list.clear();
     list.scene = [w, h, time as f32, 1.0];
     draw(list);
@@ -160,6 +173,9 @@ fn fill(list: &mut DrawList, w: f32, h: f32, time: f64, draw: impl FnOnce(&mut D
     }
     if list.scene[3].is_nan() || list.scene[3] <= 0.0 {
         list.scene[3] = 1.0;
+    }
+    if px != 1.0 {
+        list.scene[3] *= px;
     }
 }
 
@@ -177,7 +193,7 @@ fn present(
     slots: &mut Slots,
     target: &Target,
     swap: (u32, u32),
-    alpha: wgpu::CompositeAlphaMode,
+    present: Present,
     list: Option<&DrawList>,
 ) -> bool {
     // Held for the whole frame: surface configuration takes the write side.
@@ -192,7 +208,7 @@ fn present(
         wgpu::CurrentSurfaceTexture::Outdated => {
             drop(frame);
             let _w = gate.write().unwrap_or_else(PoisonError::into_inner);
-            target.surface.configure(&gpu.device, &surface_config(swap, alpha));
+            target.surface.configure(&gpu.device, &surface_config(swap, present));
             false
         }
         _ => false,
@@ -204,7 +220,7 @@ fn present(
 fn render_loop<B: OverlayBackend>(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
     B::raise_priority();
     let swap = sh.swap;
-    let alpha = sh.alpha;
+    let pres = sh.present;
     let mut slots = Slots::new(&gpu);
     let mut timer = FrameTimer::new();
     let epoch = Instant::now();
@@ -251,13 +267,13 @@ fn render_loop<B: OverlayBackend>(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock
             Job::Draw => Some(&main_list),
             _ => None,
         };
-        if work.main != Job::Idle && present(&gpu, &gate, &mut slots, &sh.main, swap, alpha, list) {
+        if work.main != Job::Idle && present(&gpu, &gate, &mut slots, &sh.main, swap, pres, list) {
             sh.frames.fetch_add(1, Ordering::Relaxed);
         }
         if let Some((target, job)) = work.above {
             // The above panel has the main panel's size (3.3).
             let list = (job == Job::Draw).then_some(&above_list);
-            present(&gpu, &gate, &mut slots, &target, swap, alpha, list);
+            present(&gpu, &gate, &mut slots, &target, swap, pres, list);
         }
         if stats_on {
             let done = epoch.elapsed().as_secs_f64();
@@ -307,8 +323,8 @@ struct Screen {
 
 struct State<B> {
     backend: B,
-    /// Composite alpha mode of every panel's swap chain.
-    alpha: wgpu::CompositeAlphaMode,
+    /// Alpha and present mode of every panel's swap chain.
+    present: Present,
     gpu: Arc<Gpu>,
     instance: wgpu::Instance,
     /// Frames hold it for reading, surface configuration for writing.
@@ -323,17 +339,18 @@ struct State<B> {
 /// Creates the above panel of a screen (configured under the render gate).
 fn create_above<B: OverlayBackend>(
     backend: &B,
-    alpha: wgpu::CompositeAlphaMode,
+    present: Present,
     instance: &wgpu::Instance,
     gpu: &Gpu,
     gate: &RwLock<()>,
     s: &mut Screen,
 ) -> Result<(), String> {
-    let swap = plan::swap_size(s.info.width, s.info.height);
+    // The above panel has the main panel's swap chain size (3.3).
+    let swap = s.shared.swap;
     let panel = backend.create_panel(instance, s.pixels, swap, s.info.scale)?;
     {
         let _w = gate.write().unwrap_or_else(PoisonError::into_inner);
-        panel.target().surface.configure(&gpu.device, &surface_config(swap, alpha));
+        panel.target().surface.configure(&gpu.device, &surface_config(swap, present));
     }
     panel.commit();
     panel.show(s.shown);
@@ -408,14 +425,14 @@ impl<B: OverlayBackend> State<B> {
     fn layout(&mut self, i: usize, immediate: bool) {
         let now = self.now();
         let behind = self.cfg.behind;
-        let Self { backend, alpha, instance, gpu, gate, screens, .. } = self;
+        let Self { backend, present, instance, gpu, gate, screens, .. } = self;
         let s = &mut screens[i];
         let turn = s.stager.begin();
         let draws_above = s.shared.with_fall(|f| f.draws_above()).unwrap_or(false);
         let mut ready = false;
         let mut raise = false;
         if behind && draws_above {
-            ready = s.above.is_some() || create_above(backend, *alpha, instance, gpu, gate, s).is_ok();
+            ready = s.above.is_some() || create_above(backend, *present, instance, gpu, gate, s).is_ok();
         }
         match plan::sit_plan(behind, draws_above, ready) {
             SitPlan::Staged if immediate => {
@@ -567,7 +584,7 @@ impl<B: OverlayBackend> Host<B> {
 
         let mut pending: Vec<(PanelInfo, PixelRect, PanelWin, (u32, u32))> = Vec::new();
         for (m, info) in monitors.iter().zip(plan::panel_infos(monitors)) {
-            let swap = plan::swap_size(info.width, info.height);
+            let swap = backend.swap_size(m.pixels, plan::swap_size(info.width, info.height));
             match backend.create_panel(&instance, m.pixels, swap, info.scale) {
                 Ok(p) => pending.push((info, m.pixels, p, swap)),
                 Err(e) => log::warn!("overlay: monitor {} skipped: {e}", m.id),
@@ -581,13 +598,14 @@ impl<B: OverlayBackend> Host<B> {
         }))
         .map_err(|e| format!("no adapter: {e}"))
         .and_then(|adapter| {
-            let alpha = backend.alpha_mode(&first_target.surface.get_capabilities(&adapter));
+            let caps = first_target.surface.get_capabilities(&adapter);
+            let present = Present { alpha: backend.alpha_mode(&caps), mode: backend.present_mode(&caps) };
             pollster::block_on(adapter.request_device(&crate::gpu::device_descriptor(&adapter)))
-                .map(|(d, q)| (d, q, alpha))
+                .map(|(d, q)| (d, q, present))
                 .map_err(|e| format!("no device: {e}"))
         });
         drop(first_target);
-        let (device, queue, alpha) = match device {
+        let (device, queue, present) = match device {
             Ok(d) => d,
             Err(e) => {
                 // No GPU: release the windows made so far (3.1 edge case).
@@ -604,11 +622,13 @@ impl<B: OverlayBackend> Host<B> {
         // waits for the shared device to go idle, which fails while another
         // panel's thread keeps submitting (found while scaffolding).
         for (_, _, p, swap) in &pending {
-            p.target().surface.configure(&gpu.device, &surface_config(*swap, alpha));
+            p.target().surface.configure(&gpu.device, &surface_config(*swap, present));
             p.commit();
         }
         let mut screens = Vec::new();
         for (info, pixels, main, swap) in pending {
+            let dip = plan::swap_size(info.width, info.height);
+            let px_per_pt = if swap == dip { 1.0 } else { swap.0 as f32 / info.width.max(1.0) as f32 };
             let shared = Arc::new(Loop {
                 main: main.target(),
                 gate: Mutex::new(Gate { fall: None, above: None, above_cleared: true, main_dirty: true }),
@@ -618,9 +638,10 @@ impl<B: OverlayBackend> Host<B> {
                 frames: AtomicU64::new(0),
                 size: (info.width as f32, info.height as f32),
                 swap,
+                px_per_pt,
                 pixels,
                 scale: info.scale,
-                alpha,
+                present,
             });
             let thread = spawn_loop::<B>(shared.clone(), gpu.clone(), gate.clone());
             main.show(true);
@@ -637,8 +658,17 @@ impl<B: OverlayBackend> Host<B> {
                 stager: Stager::new(),
             });
         }
-        let mut state =
-            State { backend, alpha, gpu, instance, gate, cfg, screens, epoch: Instant::now(), under_dock: Vec::new() };
+        let mut state = State {
+            backend,
+            present,
+            gpu,
+            instance,
+            gate,
+            cfg,
+            screens,
+            epoch: Instant::now(),
+            under_dock: Vec::new(),
+        };
         state.install_effect();
         let state = Arc::new(Mutex::new(state));
         let weak = Arc::downgrade(&state);

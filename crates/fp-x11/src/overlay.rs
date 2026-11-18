@@ -65,7 +65,8 @@ fn panel(x: &'static Xc, instance: &wgpu::Instance, pixels: PixelRect, swap: (u3
     }
     let _ = c.flush();
     if swap != (u32::from(w), u32::from(h)) {
-        // X has no compositor-side scaling: the swap chain should match the window.
+        // `swap_size` hands the window's pixel size; anything else would be
+        // drawn unstretched in the top-left corner.
         log::warn!("x11 overlay: swap {swap:?} differs from the window {w}x{h}; output is not stretched");
     }
     x.own().panels.insert(win);
@@ -165,6 +166,13 @@ impl OverlayBackend for X11Overlay {
         let m = pick_alpha(&caps.alpha_modes);
         log::info!("x11 overlay: alpha modes {:?} -> {m:?}", caps.alpha_modes);
         m
+    }
+
+    /// X has no compositor-side scaling: in a scaled session (`Xft.dpi` above
+    /// 96) the DIP-sized swap chain would cover only part of the window, so
+    /// the panel renders at its pixel size.
+    fn swap_size(&self, pixels: PixelRect, _dip: (u32, u32)) -> (u32, u32) {
+        fp_platform::overlay::pixel_swap(pixels)
     }
 
     fn create_panel(

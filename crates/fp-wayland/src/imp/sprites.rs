@@ -12,14 +12,16 @@
 //! learns about the pointer through its own input region. A click-through
 //! sprite therefore keeps an input region over its opaque pixels (alpha
 //! mask, rows in 2 px bands) so hover can be detected at all; a clickable
-//! one takes its whole rect. Sprites that should never take input (moving
-//! characters) cannot be told apart through the current trait.
+//! one takes its whole rect. Sprites that never take input (moving
+//! characters, `HitMode::Never` through [`SpriteBackend::set_hit_mode`])
+//! get an empty input region, so clicks fall through to the window below.
 
 use super::Shared;
 use super::overlay::NAMESPACE;
 use super::wl::Wl;
 use crate::logic::{self, Placement, Snapshot};
 use fp_core::geom::PixelRect;
+use fp_core::scene::HitMode;
 use fp_platform::sprites::{Place, SpriteBackend, WinId};
 use sctk::shell::WaylandSurface;
 use sctk::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer, LayerSurface};
@@ -55,6 +57,8 @@ struct Sprite {
     /// Alpha the buffer was made with.
     buffer_alpha: u8,
     click_through: bool,
+    /// `HitMode::Never`: no input region at all.
+    never: bool,
     band: Option<Layer>,
     mapped: Option<Mapped>,
     /// Last placement request (pixels), for re-mapping.
@@ -99,8 +103,13 @@ fn make_buffer(wl: &mut Wl, sp: &Sprite, alpha: u8) -> Option<Buffer> {
 }
 
 fn input_region(wl: &Wl, sp: &Sprite, m: &Mapped) {
-    let rects =
-        if sp.click_through { logic::scale_rects(&sp.mask, wl.st.scale) } else { vec![(0, 0, m.place.w, m.place.h)] };
+    let rects = if sp.never {
+        Vec::new()
+    } else if sp.click_through {
+        logic::scale_rects(&sp.mask, wl.st.scale)
+    } else {
+        vec![(0, 0, m.place.w, m.place.h)]
+    };
     if let Some(r) = wl.region(&rects) {
         m.layer.wl_surface().set_input_region(Some(r.wl_region()));
     }
@@ -258,6 +267,20 @@ impl SpriteBackend for WlSprites {
             return;
         }
         sp.click_through = on;
+        if let (Some(wl), Some(m)) = (&self.wl, &sp.mapped) {
+            let wl = wl.borrow();
+            input_region(&wl, sp, m);
+            m.layer.commit();
+        }
+    }
+
+    fn set_hit_mode(&mut self, id: WinId, mode: HitMode) {
+        let Some(sp) = self.sprites.get_mut(&id.0) else { return };
+        let never = mode == HitMode::Never;
+        if sp.never == never {
+            return;
+        }
+        sp.never = never;
         if let (Some(wl), Some(m)) = (&self.wl, &sp.mapped) {
             let wl = wl.borrow();
             input_region(&wl, sp, m);

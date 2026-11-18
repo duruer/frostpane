@@ -2,6 +2,7 @@
 //! (snowballs 3.7, characters 0.1, decorations 3.4-3.7, desktop-native 3.4).
 
 use fp_core::geom::PixelRect;
+use fp_core::scene::HitMode;
 use tiny_skia::Pixmap;
 
 /// Opaque OS window handle.
@@ -30,6 +31,10 @@ pub trait SpriteBackend {
     fn hide(&mut self, id: WinId);
     /// Toggle `WS_EX_TRANSPARENT`.
     fn set_click_through(&mut self, id: WinId, on: bool);
+    /// The sprite's hit mode, set on creation and whenever it changes. A
+    /// backend without a global cursor (Wayland) shapes its input region from
+    /// it; the default ignores it (click-through covers every other case).
+    fn set_hit_mode(&mut self, _id: WinId, _mode: HitMode) {}
     /// z-order change without move/resize/activation.
     fn place(&mut self, id: WinId, p: Place);
     /// Lowest-z taskbar window among the topmost ones.

@@ -5,7 +5,7 @@
 use fp_core::geom::PixelRect;
 use std::sync::Arc;
 
-/// Swap chain surface of one panel. Size is the DIP-sized swap chain.
+/// Swap chain surface of one panel, sized by [`OverlayBackend::swap_size`].
 pub struct PanelTarget {
     pub surface: wgpu::Surface<'static>,
 }
@@ -39,8 +39,20 @@ pub trait OverlayBackend: Clone + 'static {
     const BACKENDS: wgpu::Backends;
     /// Composite alpha mode of the panels' swap chains.
     fn alpha_mode(&self, caps: &wgpu::SurfaceCapabilities) -> wgpu::CompositeAlphaMode;
-    /// A hidden panel covering `pixels`, rendering at `swap` (DIP size)
-    /// stretched to the monitor. The surface is not configured yet.
+    /// Present mode of the panels' swap chains. Default: Fifo (vsync),
+    /// which every surface supports.
+    fn present_mode(&self, _caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
+        wgpu::PresentMode::Fifo
+    }
+    /// Swap chain size of a panel covering `pixels` whose DIP size is `dip`.
+    /// Default: `dip`, stretched to the monitor by the compositor (Windows
+    /// `SetTransform`, Core Animation, `wp_viewporter`). A platform that
+    /// cannot stretch (X11) returns the panel's pixel size.
+    fn swap_size(&self, _pixels: PixelRect, dip: (u32, u32)) -> (u32, u32) {
+        dip
+    }
+    /// A hidden panel covering `pixels`, rendering at `swap`
+    /// ([`OverlayBackend::swap_size`]) stretched to the monitor. The surface is not configured yet.
     fn create_panel(
         &self,
         instance: &wgpu::Instance,
@@ -71,6 +83,21 @@ pub fn pick_alpha(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMod
         .find(|m| modes.contains(m))
         .or_else(|| modes.first().copied())
         .unwrap_or(M::Auto)
+}
+
+/// [`OverlayBackend::swap_size`] of a platform without compositor-side
+/// scaling: the panel's pixel size, clamped like the DIP size.
+pub fn pixel_swap(pixels: PixelRect) -> (u32, u32) {
+    let f = |v: i32| v.clamp(1, 16384) as u32;
+    (f(pixels.width()), f(pixels.height()))
+}
+
+/// Present mode for a panel whose swap chain must never block its render
+/// thread while the compositor withholds frame callbacks (an occluded
+/// Wayland surface): Mailbox, else Immediate, else Fifo.
+pub fn pick_nonblocking(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
+    use wgpu::PresentMode as P;
+    [P::Mailbox, P::Immediate].into_iter().find(|m| modes.contains(m)).unwrap_or(P::Fifo)
 }
 
 /// Visual scale that stretches the DIP-sized swap chain over the monitor's
@@ -121,6 +148,22 @@ mod tests {
         let s = visual_scale(PixelRect::new(0, 0, 3840, 2160), (2560, 1440));
         assert!((s.0 - 1.5).abs() < 1e-6 && (s.1 - 1.5).abs() < 1e-6);
         assert_eq!(visual_scale(PixelRect::new(0, 0, 0, 0), (0, 0)), (1.0, 1.0));
+    }
+
+    #[test]
+    fn pixel_swap_clamps() {
+        assert_eq!(pixel_swap(PixelRect::new(0, 0, 3840, 2160)), (3840, 2160));
+        assert_eq!(pixel_swap(PixelRect::new(0, 0, 0, 0)), (1, 1));
+        assert_eq!(pixel_swap(PixelRect::new(0, 0, 40000, 10)), (16384, 10));
+    }
+
+    #[test]
+    fn nonblocking_preference() {
+        use wgpu::PresentMode as P;
+        assert_eq!(pick_nonblocking(&[P::Fifo, P::Mailbox, P::Immediate]), P::Mailbox);
+        assert_eq!(pick_nonblocking(&[P::Fifo, P::Immediate]), P::Immediate);
+        assert_eq!(pick_nonblocking(&[P::Fifo]), P::Fifo);
+        assert_eq!(pick_nonblocking(&[]), P::Fifo);
     }
 
     #[test]

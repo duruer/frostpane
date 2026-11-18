@@ -189,6 +189,9 @@ impl<B: Backend> Core<B> {
                     e.mask = None;
                 }
             }
+            if created || hit_changed {
+                self.be.set_hit_mode(e.id, s.hit);
+            }
             // Click-through baseline: Always is clickable, the rest start
             // click-through (Alpha is toggled by `hit`).
             let want = s.hit != HitMode::Always;
@@ -414,6 +417,9 @@ impl Backend for Injected {
     fn set_click_through(&mut self, id: WinId, on: bool) {
         self.0.set_click_through(id, on);
     }
+    fn set_hit_mode(&mut self, id: WinId, mode: HitMode) {
+        self.0.set_hit_mode(id, mode);
+    }
     fn place(&mut self, id: WinId, p: Place) {
         self.0.place(id, p);
     }
@@ -534,6 +540,8 @@ mod tests {
         fullscreen: Vec<PixelRect>,
         fail_create: bool,
         fail_bitmap: bool,
+        /// `set_hit_mode` calls, kept out of `log`.
+        hits: Vec<(isize, HitMode)>,
     }
 
     impl Backend for Mock {
@@ -560,6 +568,9 @@ mod tests {
         }
         fn set_click_through(&mut self, id: WinId, on: bool) {
             self.log.push(format!("ct {} {on}", id.0));
+        }
+        fn set_hit_mode(&mut self, id: WinId, mode: HitMode) {
+            self.hits.push((id.0, mode));
         }
         fn place(&mut self, id: WinId, p: Place) {
             self.log.push(format!("place {} {p:?}", id.0));
@@ -655,6 +666,19 @@ mod tests {
         m[0].rev = 2;
         assert_eq!(run(&mut c, &m, t0), 1);
         assert_eq!(log(&mut c), vec!["bitmap 1 20x20", "present 1 110,960 a128"]);
+    }
+
+    #[test]
+    fn hit_mode_reaches_the_backend_on_create_and_change() {
+        let t0 = Instant::now();
+        let mut c = Core::new(Mock::default());
+        let mut s = [sprite(1, ZBand::Front, HitMode::Never, 0.0, 0.0)];
+        run(&mut c, &s, t0);
+        run(&mut c, &s, t0);
+        assert_eq!(c.be.hits, vec![(1, HitMode::Never)]);
+        s[0].hit = HitMode::Alpha;
+        run(&mut c, &s, t0);
+        assert_eq!(c.be.hits, vec![(1, HitMode::Never), (1, HitMode::Alpha)]);
     }
 
     #[test]

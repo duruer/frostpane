@@ -236,6 +236,19 @@ impl OverlayBackend for WlOverlay {
         pick_alpha(&caps.alpha_modes)
     }
 
+    /// A Fifo swap chain blocks its render thread while the compositor sends
+    /// no frame callbacks (an occluded or hidden panel); Mailbox never
+    /// blocks and the host caps the rate at 60 fps itself.
+    fn present_mode(&self, caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
+        let m = fp_platform::overlay::pick_nonblocking(&caps.present_modes);
+        log::info!("wayland overlay: present modes {:?} -> {m:?}", caps.present_modes);
+        m
+    }
+
+    // `swap_size` keeps the DIP default: the content subsurface's viewport
+    // (or, without viewporter, the logical surface size, which is the DIP
+    // size) stretches the swap chain over the output.
+
     fn create_panel(
         &self,
         instance: &wgpu::Instance,

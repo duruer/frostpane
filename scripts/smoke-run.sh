@@ -7,9 +7,8 @@
 # Environment:
 #   SMOKE_REQUIRE_FRAMES=1  fail unless frames > 0 (a real backend must draw)
 #   SMOKE_MIN_PANELS=N      fail unless panels >= N (default 0)
-#   SMOKE_ALLOW_NULL=1      default; while a backend is still the Null one the
-#                           binary logs "not yet supported" and presents nothing.
-#                           That is accepted unless SMOKE_REQUIRE_FRAMES=1.
+#   A session served by the Null overlay logs "no overlay backend" and presents
+#   nothing; that is accepted unless SMOKE_REQUIRE_FRAMES=1.
 #   SMOKE_POST=cmd          optional command run ~half way through the run
 #                           (e.g. a screenshot); its failure fails the smoke.
 # Extra env (FROSTPANE_BACKEND, DISPLAY, ...) passes straight through.
@@ -77,7 +76,7 @@ panels="${panels:-0}"
 frames="${frames:-0}"
 echo "smoke: panels=$panels frames=$frames"
 
-if grep -q "not yet supported" "$log"; then
+if grep -q "no overlay backend" "$log"; then
   echo "smoke: backend is a Null placeholder"
   if [ "${SMOKE_REQUIRE_FRAMES:-0}" = "1" ]; then
     echo "smoke: FAIL frames required but backend is Null" >&2
