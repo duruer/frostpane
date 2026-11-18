@@ -190,7 +190,7 @@ impl Shell {
                 }
                 widgets::label(ui, self.t(fp_text::Key::UpdOffline), 12.0, theme::rgb(theme::WARNING));
             }
-            UpdateLine::Available { version, url } => {
+            UpdateLine::Available { version, url: _ } => {
                 let text = fp_text::update_available(self.lang, &version);
                 let st = widgets::PillStyle {
                     height: 32.0,
@@ -203,7 +203,7 @@ impl Shell {
                     text: Color32::WHITE,
                 };
                 if widgets::pill(ui, &text, st, true).clicked() {
-                    self.emit(UiAction::OpenUrl(url));
+                    self.emit(UiAction::ShowUpdate);
                 }
             }
         }

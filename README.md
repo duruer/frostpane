@@ -76,7 +76,7 @@ Every effect has a matching wallpaper, and each one can follow the time of day, 
 ## 💙 Made to be nice
 
 - **Free, forever.** No ads, no premium tier, nothing locked away.
-- **Private.** No account, no tracking, no analytics. Frostpane only goes online to check the weather for the city you choose, and to tell you when an update is out.
+- **Private.** No account, no tracking, no analytics. Frostpane only goes online to check the weather for the city you choose, to tell you when an update is out, and to download that update when you install it.
 - **Polite.** It never steals your clicks, and it can sit behind your windows if you prefer.
 - **Multi-monitor ready.** Snow falls on every screen you pick, at any scaling.
 - **Speaks your language.** English, Deutsch, Español, Français, 日本語, 한국어, Русский, Türkçe and Қазақша.
@@ -126,6 +126,14 @@ Desktop support:
 - **X11:** full support. Weather effects need a compositing window manager (most desktops have one; on a bare window manager start a compositor).
 - **Wayland:** KDE Plasma, sway and Hyprland are supported. Snow lands on windows only there, the main window minimizes instead of hiding, and cards appear where the desktop places them. GNOME runs Frostpane through XWayland with fewer features. Frostpane shows a note in the app for anything your session cannot do.
 - **Tray icon:** on GNOME you need the *AppIndicator and KStatusNotifierItem* extension to see it.
+
+## 🔄 Updates
+
+Frostpane checks for a new version now and then, and you can ask it any time with **Check for updates** at the top of the window. When a new version is out, a small card offers **Install update**: Frostpane downloads it, puts it in place and restarts by itself. No trip to the download page needed. **Release notes** shows what changed.
+
+- **Automatic updates are off unless you turn them on.** With **Settings → General → Install updates automatically**, new versions download in the background and install while Frostpane's window is closed and you are not dragging anything. If that moment never comes, the update goes in when you quit Frostpane. After the restart a short note tells you which version you now have.
+- **Every download is checked.** Each release comes with a list of file checksums signed with the Frostpane release key. The app carries the matching public key and installs nothing unless the signature and the file's checksum both match. If anything is off, your current version stays as it is.
+- **When Frostpane can't update itself**, the card opens the download page instead and says why: copies installed with a package manager (the `.deb`) update through it, and a Frostpane in a folder it may not write to (such as `Program Files`) needs a manual download.
 
 ## 🛠️ For developers
 

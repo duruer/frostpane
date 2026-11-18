@@ -10,7 +10,9 @@ use fp_sources::openmeteo;
 use fp_sources::update::{self, Release};
 use std::collections::BTreeMap;
 
-/// Where the latest release is read from (notice only, never downloaded).
+/// Where the latest release is read from (the notice and the in-app
+/// updater's file list; the updater downloads only after the user or the
+/// automatic-updates setting asks).
 pub const RELEASE_URL: &str = "https://api.github.com/repos/duruer/frostpane/releases/latest";
 /// First release check after start (core-app 2.11).
 pub const FIRST_CHECK_S: f64 = 20.0;

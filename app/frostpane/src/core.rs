@@ -11,6 +11,7 @@ use crate::factory;
 use crate::outside::{self, OutsideWatch};
 use crate::react::{Reaction, react};
 use crate::sources::{Event, Sources, UpdateOutcome};
+use crate::updater::{self, Fail, Msg, SelfUpdate};
 use crate::wallpaper::{self, Dirs, Wallpaper};
 use fp_core::clock::{Clock, WallTime};
 use fp_core::desktop::{Layout, MonitorInfo};
@@ -28,11 +29,14 @@ use fp_net::Worker;
 use fp_overlay::OverlayHost;
 use fp_platform::{Guard, Limits, Platform, Services, Shell as Os, SleepState, SystemClock, SystemEvent};
 use fp_sources::season;
-use fp_sources::update;
+use fp_sources::update::{self, Release};
 use fp_tracker::{HookEvent, PollInput, Tracker, select_screens};
 use fp_ui::eframe::egui;
 use fp_ui::model::DisplayInfo;
-use fp_ui::{CardAction, CardCtx, Cards, HostInfo, Notices, Shell, Tray, TrayAction, UiAction, UpdateLine};
+use fp_ui::{
+    CardAction, CardCtx, Cards, HostInfo, Notices, Shell, Tray, TrayAction, UiAction, UpdateFail, UpdateLine,
+    UpdatePhase,
+};
 use fp_world::{CardRequest, Command, World, WorldInput, WorldOutput};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -53,6 +57,8 @@ const SHELVES_EVERY_S: f64 = 1.0;
 const HOVER_EVERY_S: f64 = 0.1;
 /// A quit that the window loop has not completed after this long is forced.
 const FORCE_EXIT_S: f64 = 3.0;
+/// Pause between "Restarting…" showing and the swap (one visible frame).
+const RESTART_AFTER_S: f64 = 0.6;
 /// egui pass cadence while the main window or a card shows.
 const UI_REPAINT: Duration = Duration::from_millis(100);
 /// egui pass cadence while nothing of egui is on screen. Everything that
@@ -169,6 +175,16 @@ pub struct Core {
     /// Last overlay statistics, kept after the overlay is dropped.
     last_panels: usize,
     last_frames: u64,
+    /// The in-app updater (download, verify, stage, swap, relaunch).
+    self_update: SelfUpdate,
+    /// The newest release seen by a check, when it is newer than this build.
+    release: Option<Release>,
+    /// The user pressed Install: restart as soon as the update is staged.
+    install_asked: bool,
+    /// Clock time to swap and restart ("Restarting…" shows until then).
+    restart_at: Option<f64>,
+    /// Version an update just installed; a toast says so once the window shows.
+    updated_toast: Option<String>,
     pub ticks: u64,
 }
 
@@ -490,6 +506,15 @@ impl Core {
         let worker_wake = ctx.clone();
         let sources =
             Sources::new(Worker::spawn(move || worker_wake.request_repaint()), now, env!("CARGO_PKG_VERSION"));
+        let self_update = SelfUpdate::new(
+            crate::platform::updater(),
+            updater::plan_here(),
+            Arc::new(fp_net::Downloader::release()),
+            &cfg.data_dir,
+        );
+        if let Some(b) = self_update.blocked() {
+            log::info!("in-app updates unavailable here: {b:?}");
+        }
 
         let mut core = Self {
             args: cfg.args,
@@ -547,6 +572,11 @@ impl Core {
             deadline: crate::args::deadline(cfg.args.seconds, Instant::now()),
             last_panels: 0,
             last_frames: 0,
+            self_update,
+            release: None,
+            install_asked: false,
+            restart_at: None,
+            updated_toast: None,
             ticks: 0,
             platform,
             make_overlay: cfg.overlay,
@@ -554,6 +584,8 @@ impl Core {
             ctx: ctx.clone(),
         };
         core.shell = Shell::new(core.host_info());
+        core.cards.set_update_manual(core.update_manual());
+        core.updated_toast = take_updated(&mut core.prefs, env!("CARGO_PKG_VERSION"));
         core.cards.set_focus_close(core.limits.no_global_cursor);
         core.shell.set_reduce_motion(core.reduce_motion);
         let wake = ctx.clone();
@@ -587,6 +619,7 @@ impl Core {
             work_areas: work_areas(&self.monitors),
             notices: notices(&self.limits),
             wallpaper_supported: Os::wallpaper_supported(&*self.platform),
+            update_manual: self.update_manual(),
             ..HostInfo::default()
         }
     }
@@ -652,6 +685,7 @@ impl Core {
             self.toggle_picker();
         }
         self.run_sources(now, wall);
+        self.run_update(now);
         if now >= self.next_power {
             self.next_power = now + POWER_EVERY_S;
             self.read_power();
@@ -1116,18 +1150,18 @@ impl Core {
             Event::Cities { query, result } => self.shell.city_results(&query, result),
             Event::Update { asked, outcome } => match outcome {
                 UpdateOutcome::Newer(r) => {
-                    let version = r.tag.trim_start_matches(['v', 'V']).to_string();
-                    self.shell.update_result(UpdateLine::Available { version: version.clone(), url: r.url.clone() });
+                    let version = updater::version_of(&r.tag).to_string();
+                    self.shell.update_result(UpdateLine::Available { version, url: r.url.clone() });
+                    // Automatic updates fetch quietly and install when idle;
+                    // the card then only shows when the user asked.
+                    let auto = self.weathers.settings.auto_update && self.self_update.can_install(&r);
+                    if auto {
+                        self.self_update.start(&r);
+                    }
+                    self.release = Some(r.clone());
                     let asked_at = self.prefs.get_str(KEY_UPDATE_ASKED);
-                    if update::should_prompt(asked, self.seen_welcome(), asked_at, wall.unix) {
-                        let cx = CardCtx {
-                            lang: self.lang,
-                            layout: &self.layout,
-                            sprites: &self.out.sprites,
-                            cursor: self.cursor_point(),
-                            tree_origin: None,
-                        };
-                        self.cards.open_update(&version, &r.url, &cx, now);
+                    if (asked || !auto) && update::should_prompt(asked, self.seen_welcome(), asked_at, wall.unix) {
+                        self.open_update_card(&r, now);
                     }
                 }
                 other => {
@@ -1138,6 +1172,121 @@ impl Core {
             },
         }
         self.ctx.request_repaint();
+    }
+
+    // ---- in-app updates ----
+
+    /// Why this copy cannot install updates itself, for the UI.
+    fn update_manual(&self) -> Option<fp_text::ManualReason> {
+        manual_reason(self.self_update.blocked())
+    }
+
+    /// Open the update card for `r` (keeps a running install's state).
+    fn open_update_card(&mut self, r: &Release, now: f64) {
+        let manual = self.update_manual().or_else(|| {
+            // This copy could update, but the release has no file for it.
+            (!self.self_update.can_install(r)).then_some(fp_text::ManualReason::Other)
+        });
+        self.cards.set_update_manual(manual);
+        let running = self.self_update.busy() || self.restart_at.is_some();
+        if !running && !self.cards.update_open() {
+            self.cards.set_update_phase(UpdatePhase::Offer);
+        }
+        let version = updater::version_of(&r.tag).to_string();
+        let cx = CardCtx {
+            lang: self.lang,
+            layout: &self.layout,
+            sprites: &self.out.sprites,
+            cursor: self.cursor_point(),
+            tree_origin: None,
+        };
+        self.cards.open_update(&version, &r.url, &cx, now);
+        self.ctx.request_repaint();
+    }
+
+    /// "Install update" on the card.
+    fn install_asked(&mut self) {
+        let Some(r) = self.release.clone() else { return };
+        self.install_asked = true;
+        if self.self_update.ready_for(&r) {
+            self.cards.set_update_phase(UpdatePhase::Restarting);
+            self.restart_at = Some(self.clock.now() + RESTART_AFTER_S);
+        } else if self.self_update.busy() {
+            // Already fetching (automatic updates): restart when staged.
+        } else if self.self_update.start(&r) {
+            let total = self.self_update.size_for(&r);
+            self.cards.set_update_phase(UpdatePhase::Downloading { done: 0, total });
+        } else {
+            self.install_asked = false;
+            self.cards.set_update_phase(UpdatePhase::Failed(UpdateFail::Install));
+        }
+        self.ctx.request_repaint();
+    }
+
+    /// Updater news, the delayed restart, and the idle install of automatic
+    /// updates (main window closed, no card, no mouse button held).
+    fn run_update(&mut self, now: f64) {
+        for m in self.self_update.poll() {
+            match m {
+                Msg::Progress { done, total } => self.cards.set_update_phase(UpdatePhase::Downloading { done, total }),
+                Msg::Ready if self.install_asked => {
+                    self.cards.set_update_phase(UpdatePhase::Restarting);
+                    self.restart_at = Some(now + RESTART_AFTER_S);
+                }
+                Msg::Ready => self.cards.set_update_phase(UpdatePhase::Offer),
+                Msg::Failed(f) => {
+                    log::warn!("update failed: {f:?}");
+                    self.install_asked = false;
+                    self.cards.set_update_phase(UpdatePhase::Failed(card_fail(f)));
+                }
+            }
+            self.ctx.request_repaint();
+        }
+        if self.restart_at.is_some_and(|t| now >= t) {
+            self.restart_at = None;
+            self.install_now(false);
+        } else if self.restart_at.is_none()
+            && self.weathers.settings.auto_update
+            && self.self_update.ready()
+            && update_idle(
+                self.visible,
+                self.cards.any_open(),
+                self.platform.left_button_down() || self.platform.right_button_down(),
+                self.seen_welcome(),
+                self.quitting.is_some(),
+            )
+        {
+            self.install_now(true);
+        }
+    }
+
+    /// Swap the staged copy in, start it and quit. `quiet`: the new copy
+    /// starts in the tray (automatic updates); otherwise its window opens.
+    fn install_now(&mut self, quiet: bool) {
+        let Some(tag) = self.self_update.tag().map(str::to_string) else { return };
+        let _ = self.prefs.put(updater::KEY_UPDATED_TO, &updater::version_of(&tag));
+        self.save_settings();
+        let mut args = vec![updater::UPDATED_FLAG.to_string(), env!("CARGO_PKG_VERSION").to_string()];
+        if quiet {
+            args.push("--quiet".to_string());
+        }
+        match self.self_update.install(&args) {
+            Ok(()) => {
+                log::info!("update {tag} installed, restarting");
+                self.quit();
+            }
+            Err(f) => {
+                let _ = self.prefs.set(updater::KEY_UPDATED_TO, None);
+                self.install_asked = false;
+                self.cards.set_update_phase(UpdatePhase::Failed(card_fail(f)));
+                if let Some(r) = self.release.clone()
+                    && !quiet
+                {
+                    let now = self.egui_now();
+                    self.open_update_card(&r, now);
+                }
+            }
+        }
     }
 
     // ---- settings ----
@@ -1354,6 +1503,12 @@ impl Core {
                 self.apply_ui(a);
             }
         }
+        if self.visible
+            && let Some(v) = self.updated_toast.take()
+        {
+            let now = self.egui_now();
+            self.shell.toast(&fp_text::update_done(self.lang, &v), now);
+        }
         let ctx = ui.ctx().clone();
         for a in self.cards.show(&ctx, self.lang) {
             self.apply_card(a);
@@ -1431,6 +1586,19 @@ impl Core {
                 self.sources.refresh_forecast(&self.weathers.settings, nowc);
                 Changes::OTHER
             }
+            UiAction::ShowUpdate => {
+                if let Some(r) = self.release.clone() {
+                    self.open_update_card(&r, now);
+                }
+                Changes::NONE
+            }
+            UiAction::SetAutoUpdate(on) => {
+                w.settings.auto_update = on;
+                if on && let Some(r) = self.release.clone() {
+                    self.self_update.start(&r);
+                }
+                Changes::OTHER
+            }
             UiAction::CheckUpdates => {
                 let started = self.sources.check_update(true);
                 let line = check_line(started, self.sources.working(), self.egui_now());
@@ -1495,6 +1663,7 @@ impl Core {
                 let at = self.clock.wall().iso_utc();
                 let _ = self.prefs.put(KEY_UPDATE_ASKED, &at);
             }
+            CardAction::InstallUpdate => self.install_asked(),
             CardAction::OpenUrl(url) => Os::open_url(&*self.platform, &url),
             CardAction::MenuChosen(id) => self.world.command(Command::RemoveDecoration(id), now),
         }
@@ -1504,6 +1673,14 @@ impl Core {
 
     /// Final saves and teardown (UI thread). Safe to call twice.
     pub fn cleanup(&mut self) {
+        // Automatic updates: a verified copy that never found an idle moment
+        // goes in place now and runs at the next start.
+        if self.weathers.settings.auto_update
+            && let Some(tag) = self.self_update.tag().map(str::to_string)
+            && self.self_update.apply_at_quit()
+        {
+            let _ = self.prefs.put(updater::KEY_UPDATED_TO, &updater::version_of(&tag));
+        }
         let mut out = WorldOutput::default();
         self.world.shutdown(&mut out);
         self.out.prefs = out.prefs;
@@ -1519,6 +1696,39 @@ impl Core {
         crate::crash::finish(&self.data_dir);
         let _ = (&self.args, self.started);
     }
+}
+
+/// The UI's reason for a copy that cannot update itself.
+fn manual_reason(b: Option<fp_platform::update::Blocked>) -> Option<fp_text::ManualReason> {
+    use fp_platform::update::Blocked;
+    b.map(|b| match b {
+        Blocked::Package => fp_text::ManualReason::Package,
+        Blocked::ReadOnly => fp_text::ManualReason::Folder,
+        Blocked::Unsupported => fp_text::ManualReason::Other,
+    })
+}
+
+fn card_fail(f: Fail) -> UpdateFail {
+    match f {
+        Fail::Network => UpdateFail::Network,
+        Fail::Verify => UpdateFail::Verify,
+        Fail::Install => UpdateFail::Install,
+    }
+}
+
+/// Automatic updates install only while nobody looks: main window closed,
+/// no card open, no mouse button held (no drag), onboarding done, not
+/// already quitting.
+fn update_idle(visible: bool, cards_open: bool, button_down: bool, seen_welcome: bool, quitting: bool) -> bool {
+    !visible && !cards_open && !button_down && seen_welcome && !quitting
+}
+
+/// Reads and clears the "just updated" pref; the version when it is this
+/// build (the toast), else `None` (a rolled-back or stale entry).
+fn take_updated(prefs: &mut Prefs, current: &str) -> Option<String> {
+    let v = prefs.get_str(updater::KEY_UPDATED_TO)?.to_string();
+    let _ = prefs.set(updater::KEY_UPDATED_TO, None);
+    (v == current).then_some(v)
 }
 
 /// Status line for a finished check that is not a newer release. A check the
@@ -1545,6 +1755,38 @@ mod tests {
     use fp_core::geom::PixelRect;
     use fp_core::settings::City;
     use fp_platform::WallpaperScreen;
+
+    #[test]
+    fn update_helpers() {
+        use fp_platform::update::Blocked;
+        assert_eq!(manual_reason(None), None);
+        assert_eq!(manual_reason(Some(Blocked::Package)), Some(fp_text::ManualReason::Package));
+        assert_eq!(manual_reason(Some(Blocked::ReadOnly)), Some(fp_text::ManualReason::Folder));
+        assert_eq!(manual_reason(Some(Blocked::Unsupported)), Some(fp_text::ManualReason::Other));
+        assert_eq!(card_fail(Fail::Network), UpdateFail::Network);
+        assert_eq!(card_fail(Fail::Verify), UpdateFail::Verify);
+        assert_eq!(card_fail(Fail::Install), UpdateFail::Install);
+        // Idle: hidden window, no card, no button, onboarding done, not quitting.
+        assert!(update_idle(false, false, false, true, false));
+        assert!(!update_idle(true, false, false, true, false));
+        assert!(!update_idle(false, true, false, true, false));
+        assert!(!update_idle(false, false, true, true, false));
+        assert!(!update_idle(false, false, false, false, false));
+        assert!(!update_idle(false, false, false, true, true));
+    }
+
+    #[test]
+    fn updated_pref_gives_one_toast() {
+        let mut prefs = Prefs::memory(serde_json::Map::new());
+        assert_eq!(take_updated(&mut prefs, "2.0.0"), None);
+        prefs.put(updater::KEY_UPDATED_TO, &"2.0.0").unwrap();
+        assert_eq!(take_updated(&mut prefs, "2.0.0").as_deref(), Some("2.0.0"));
+        assert_eq!(take_updated(&mut prefs, "2.0.0"), None, "cleared");
+        // A rolled-back update: this build is not the one recorded.
+        prefs.put(updater::KEY_UPDATED_TO, &"2.0.0").unwrap();
+        assert_eq!(take_updated(&mut prefs, "1.9.0"), None);
+        assert!(prefs.get_str(updater::KEY_UPDATED_TO).is_none());
+    }
 
     #[test]
     fn limits_map_to_notices() {

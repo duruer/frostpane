@@ -19,6 +19,8 @@ mod imp;
 #[cfg(target_os = "linux")]
 mod instance;
 #[cfg(target_os = "linux")]
+pub mod update;
+#[cfg(target_os = "linux")]
 mod watcher;
 #[cfg(target_os = "linux")]
 pub use imp::{Services, kwin_on_bus, services, utc_offset_s};

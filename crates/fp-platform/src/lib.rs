@@ -30,6 +30,7 @@ pub mod null;
 pub mod overlay;
 pub mod select;
 pub mod sprites;
+pub mod update;
 
 pub use events::{SleepState, SystemEvent};
 

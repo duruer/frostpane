@@ -50,6 +50,9 @@ pub struct HostInfo {
     /// The desktop lets the app change the wallpaper (false hides the
     /// wallpaper switcher).
     pub wallpaper_supported: bool,
+    /// Why this copy cannot install updates itself; `None` when it can (the
+    /// automatic-updates switch only shows then).
+    pub update_manual: Option<fp_text::ManualReason>,
 }
 
 /// Platform limits the UI explains (porting design 7), from the backend's
@@ -101,6 +104,7 @@ impl Default for HostInfo {
             work_areas: Vec::new(),
             notices: Notices::default(),
             wallpaper_supported: true,
+            update_manual: None,
         }
     }
 }
@@ -144,6 +148,10 @@ pub enum UiAction {
     SearchCity(String),
     SetCity(Option<City>),
     CheckUpdates,
+    /// The "version x is available" pill: open the update card.
+    ShowUpdate,
+    /// The "install updates automatically" switch.
+    SetAutoUpdate(bool),
     OpenUrl(String),
     /// Reveal the wallpapers folder in the file manager.
     OpenWallpapersFolder,

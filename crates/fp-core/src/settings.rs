@@ -34,6 +34,9 @@ pub mod keys {
     pub const CITY: &str = "city";
     /// Frostpane: max standing trees and max decorations (each).
     pub const MAX_PLACED: &str = "maxPlaced";
+    /// Frostpane: download, verify and install new versions by itself
+    /// (opt-in, default off).
+    pub const AUTO_UPDATE: &str = "autoUpdate";
 }
 
 /// Strength multiplier of heavy snow.
@@ -76,6 +79,7 @@ pub struct Settings {
     pub language: Option<Lang>,
     pub city: Option<City>,
     pub max_placed: u32,
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -100,6 +104,7 @@ impl Default for Settings {
             language: None,
             city: None,
             max_placed: DEFAULT_MAX_PLACED,
+            auto_update: false,
         }
     }
 }
@@ -155,6 +160,7 @@ impl Settings {
                 .and_then(Value::as_u64)
                 .map(|v| v.clamp(1, 10_000) as u32)
                 .unwrap_or(DEFAULT_MAX_PLACED),
+            auto_update: get_bool(m, keys::AUTO_UPDATE),
         };
         s.random_weather = get_bool(m, keys::RANDOM_WEATHER) && !s.match_weather;
         s.match_season = get_bool(m, keys::MATCH_SEASON) && !s.match_weather && !s.random_weather;
@@ -187,6 +193,7 @@ impl Settings {
             (keys::MATCH_SEASON, self.match_season),
             (keys::LIGHTNING, self.lightning),
             (keys::OFTEN_VISITS, self.often_visits),
+            (keys::AUTO_UPDATE, self.auto_update),
         ];
         for (k, v) in bools {
             m.insert(k.into(), Value::Bool(v));
@@ -639,6 +646,24 @@ mod tests {
         let mut t = s.clone();
         t.screens_off = vec!["b".into()];
         assert!(!t.screen_on("b") && t.screen_on("a"));
+    }
+
+    #[test]
+    fn auto_update_is_opt_in_and_round_trips() {
+        assert!(!Settings::default().auto_update);
+        // Only a real `true` turns it on.
+        for v in [json!(null), json!("true"), json!(1), json!(false)] {
+            let (s, _) = Settings::from_map(&map(json!({ "autoUpdate": v })));
+            assert!(!s.auto_update, "{v}");
+        }
+        let s = Settings { auto_update: true, ..Settings::default() };
+        let mut m = Map::new();
+        s.write_into(&mut m);
+        assert_eq!(m.get(keys::AUTO_UPDATE), Some(&Value::Bool(true)));
+        assert_eq!(Settings::from_map(&m).0, s);
+        let mut m = Map::new();
+        Settings::default().write_into(&mut m);
+        assert_eq!(m.get(keys::AUTO_UPDATE), Some(&Value::Bool(false)));
     }
 
     #[test]

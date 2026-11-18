@@ -471,6 +471,39 @@ pub fn update_prompt_body(lang: Lang, v: &str) -> String {
     fmt(lang, Key::UpdPromptBody, &[v])
 }
 
+/// "Downloading… n%" with `done` of `total` bytes (0 % while the size is
+/// unknown, never above 100 %).
+pub fn update_downloading(lang: Lang, done: u64, total: u64) -> String {
+    let pct = (done.saturating_mul(100)).checked_div(total).unwrap_or(0).min(100);
+    fmt(lang, Key::UpdDownloading, &[&pct.to_string()])
+}
+
+/// Toast after an update: "Updated to version x".
+pub fn update_done(lang: Lang, v: &str) -> String {
+    fmt(lang, Key::UpdDone, &[v])
+}
+
+/// Why this copy cannot update itself, for the notice body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManualReason {
+    /// Installed by a package manager.
+    Package,
+    /// The app's folder is not writable.
+    Folder,
+    /// Any other reason.
+    Other,
+}
+
+/// Notice body when only the download page helps.
+pub fn update_manual(lang: Lang, why: ManualReason, v: &str) -> String {
+    let k = match why {
+        ManualReason::Package => Key::UpdManualPackage,
+        ManualReason::Folder => Key::UpdManualFolder,
+        ManualReason::Other => Key::UpdManualOther,
+    };
+    fmt(lang, k, &[v])
+}
+
 /// Month names (en, es, de, fr, ru genitive, tr, kk) for [`format_date`].
 const MONTHS: [[&str; 12]; 7] = [
     [
@@ -749,6 +782,21 @@ mod tests {
         assert_eq!(decor_count(Lang::Ko, 3, 30), "30개 중 3개 배치됨");
         assert_eq!(update_available(Lang::En, "0.2.0"), "Version 0.2.0 is available");
         assert!(update_prompt_body(Lang::Fr, "0.2.0").contains("0.2.0"));
+        assert_eq!(update_downloading(Lang::En, 50, 200), "Downloading… 25%");
+        assert_eq!(update_downloading(Lang::Tr, 5, 0), "İndiriliyor… %0");
+        assert_eq!(update_downloading(Lang::En, 300, 200), "Downloading… 100%");
+        assert_eq!(update_downloading(Lang::En, u64::MAX, u64::MAX), "Downloading… 1%");
+        assert_eq!(update_done(Lang::En, "2.0.0"), "Updated to version 2.0.0");
+        assert_eq!(update_done(Lang::Kk, "2.0.0"), "2.0.0 нұсқасына жаңартылды");
+        for why in [ManualReason::Package, ManualReason::Folder, ManualReason::Other] {
+            for l in Lang::ALL {
+                assert!(update_manual(l, why, "3.1.4").contains("3.1.4"), "{l:?} {why:?}");
+            }
+        }
+        assert_ne!(
+            update_manual(Lang::En, ManualReason::Package, "1"),
+            update_manual(Lang::En, ManualReason::Folder, "1")
+        );
         assert_eq!(checked(Lang::En, "Snow"), "\u{2713} Snow");
         assert!(language_label().contains("Язык"));
         assert!(language_label().ends_with("/ Dil / Тіл"));

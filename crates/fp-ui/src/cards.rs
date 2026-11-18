@@ -53,10 +53,39 @@ pub enum CardAction {
     TrainDismiss,
     /// The update notice was dismissed: write `updateAskedAt = now`.
     UpdateLater,
+    /// "Install update" or "Try again" on the update card: download, verify
+    /// and install, then restart.
+    InstallUpdate,
     /// Open this https page (release page of the notice).
     OpenUrl(String),
     /// The egui context menu's item was chosen: `Command::RemoveDecoration(id)`.
     MenuChosen(u64),
+}
+
+/// Where an in-app install stands (lower half of the update card).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UpdatePhase {
+    /// Offer the install (or, for a copy that cannot update itself, the page).
+    #[default]
+    Offer,
+    Downloading {
+        done: u64,
+        total: u64,
+    },
+    /// Verified and swapped in; the new version is starting.
+    Restarting,
+    Failed(UpdateFail),
+}
+
+/// Why an in-app install stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateFail {
+    /// The download did not complete.
+    Network,
+    /// The signature or checksum did not match; nothing was changed.
+    Verify,
+    /// The files could not be replaced or the new copy not started.
+    Install,
 }
 
 /// Facts the host supplies when a card opens.
@@ -77,7 +106,8 @@ const TREE_WINDOW: (f32, f32) =
     ((fp_trees::CARD_SIZE.0 + 2.0 * dress::ROOM) as f32, (fp_trees::CARD_SIZE.1 + 2.0 * dress::ROOM) as f32);
 const LIMIT_WINDOW: (f32, f32) = (cardmodel::LIMIT_SIZE.0 as f32, cardmodel::LIMIT_SIZE.1 as f32);
 const PICKER_WINDOW: (f32, f32) = (400.0, 560.0);
-const UPDATE_WINDOW: (f32, f32) = (468.0, 300.0);
+/// Wide enough for three buttons in the failed state (French, German).
+const UPDATE_WINDOW: (f32, f32) = (520.0, 300.0);
 /// The one-item menu: a 200 x 52 card plus the glass gutter.
 const MENU_WINDOW: (f32, f32) = ((200.0 + 2.0 * dress::ROOM) as f32, (52.0 + 2.0 * dress::ROOM) as f32);
 
@@ -170,6 +200,10 @@ pub struct Cards {
     station: Option<StationCard>,
     picker: Option<PickerCard>,
     update: Option<UpdateCard>,
+    /// State of the in-app install, shown by the update card.
+    update_phase: UpdatePhase,
+    /// Why this copy cannot install updates itself (`None`: it can).
+    update_manual: Option<fp_text::ManualReason>,
     pointer: Option<PointerCard>,
     menu: Option<MenuCard>,
     /// No global mouse buttons (Wayland): the dress and tree cards take
@@ -194,6 +228,32 @@ impl Cards {
         if let Some(p) = &mut self.picker {
             p.confirm_all = confirm_all;
         }
+    }
+}
+
+/// Message for a failed in-app install.
+fn fail_key(f: UpdateFail) -> Key {
+    match f {
+        UpdateFail::Network => Key::UpdFailNetwork,
+        UpdateFail::Verify => Key::UpdFailVerify,
+        UpdateFail::Install => Key::UpdFailInstall,
+    }
+}
+
+/// The error colour, lifted for the dark glass.
+fn fail_color() -> Color32 {
+    widgets::lerp_color(theme::rgb(theme::ERROR_RED), Color32::WHITE, 0.25)
+}
+
+/// Download progress: a 6 pt track with the done part in the accent colour
+/// (empty while the size is unknown).
+fn progress_bar(ui: &mut Ui, tk: &Tokens, done: u64, total: u64) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
+    ui.painter().rect_filled(rect, 3.0, Color32::from_white_alpha(theme::alpha_byte(0.14)));
+    let share = if total == 0 { 0.0 } else { (done as f64 / total as f64).clamp(0.0, 1.0) as f32 };
+    if share > 0.0 {
+        let fill = Rect::from_min_size(rect.min, vec2(rect.width() * share, rect.height()));
+        ui.painter().rect_filled(fill, 3.0, tk.accent());
     }
 }
 
@@ -227,6 +287,8 @@ impl Cards {
             station: None,
             picker: None,
             update: None,
+            update_phase: UpdatePhase::Offer,
+            update_manual: None,
             pointer: None,
             menu: None,
             focus_close: false,
@@ -433,8 +495,10 @@ impl Cards {
         self.picker = Some(PickerCard { at, rect, count, max, confirm_all: false });
     }
 
-    /// Open the update notice (core-app 2.11, notice only, nothing is
-    /// downloaded). A second call while one is open keeps the first.
+    /// Open the update notice (core-app 2.11). Its buttons install in place
+    /// ([`CardAction::InstallUpdate`]) or, for a copy that cannot update
+    /// itself, open the release page. A second call while one is open keeps
+    /// the first.
     pub fn open_update(&mut self, version: &str, url: &str, cx: &CardCtx<'_>, now: f64) {
         if self.update.is_some() {
             return;
@@ -444,6 +508,25 @@ impl Cards {
         let tl = Vec2::new(work.mid_x() - f64::from(size.0) / 2.0, work.center().y + f64::from(size.1) / 2.0);
         let at = self.placed(cx, tl, size, now);
         self.update = Some(UpdateCard { at, version: version.to_string(), url: url.to_string() });
+    }
+
+    /// The in-app install moved on (progress, restart, failure).
+    pub fn set_update_phase(&mut self, phase: UpdatePhase) {
+        self.update_phase = phase;
+    }
+
+    pub fn update_phase(&self) -> UpdatePhase {
+        self.update_phase
+    }
+
+    /// Why this copy cannot install updates itself; `None` when it can.
+    pub fn set_update_manual(&mut self, why: Option<fp_text::ManualReason>) {
+        self.update_manual = why;
+    }
+
+    /// The update card is open.
+    pub fn update_open(&self) -> bool {
+        self.update.is_some()
     }
 
     /// Keep the picker's count line current.
@@ -1036,6 +1119,9 @@ impl Cards {
         let op = c.at.fade.opacity(now);
         let mut later = false;
         let mut open = false;
+        let mut notes = false;
+        let mut install = false;
+        let (phase, manual) = (self.update_phase, self.update_manual);
         let builder = Self::builder(&c.at);
         let tex = &mut self.tex;
         ctx.show_viewport_immediate(ViewportId::from_hash_of("fp_card_update"), builder, |ui, _| {
@@ -1067,29 +1153,73 @@ impl Cards {
                     });
                 });
                 ui.add_space(16.0);
-                widgets::wrapped(
-                    ui,
-                    &fp_text::update_prompt_body(lang, &c.version),
-                    13.0,
-                    Color32::from_white_alpha(150),
-                );
-                ui.add_space(20.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::primary_button(ui, &tk, fp_text::t(lang, Key::UpdOpenPage), true).clicked() {
-                        open = true;
+                let (body, color) = match (phase, manual) {
+                    (UpdatePhase::Failed(f), _) => (fp_text::t(lang, fail_key(f)).to_string(), fail_color()),
+                    (_, Some(why)) => (fp_text::update_manual(lang, why, &c.version), Color32::from_white_alpha(150)),
+                    (_, None) => (fp_text::update_prompt_body(lang, &c.version), Color32::from_white_alpha(150)),
+                };
+                widgets::wrapped(ui, &body, 13.0, color);
+                let failed = matches!(phase, UpdatePhase::Failed(_));
+                // A failed install offers "Try again" as the button and the
+                // download page as a link, so three buttons never crowd.
+                let page_link = failed && manual.is_none();
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if widgets::link_button(ui, tk.link(), fp_text::t(lang, Key::UpdNotes), 13.0).clicked() {
+                        notes = true;
                     }
-                    ui.add_space(10.0);
-                    if widgets::quiet_button(ui, &tk, fp_text::t(lang, Key::UpdLater), 36.0, true).clicked() {
-                        later = true;
+                    if page_link {
+                        ui.add_space(16.0);
+                        if widgets::link_button(ui, tk.link(), fp_text::t(lang, Key::UpdOpenPage), 13.0).clicked() {
+                            open = true;
+                        }
                     }
                 });
+                ui.add_space(12.0);
+                match phase {
+                    UpdatePhase::Downloading { done, total } => {
+                        progress_bar(ui, &tk, done, total);
+                        ui.add_space(6.0);
+                        let text = fp_text::update_downloading(lang, done, total);
+                        widgets::label(ui, &text, 12.0, Color32::from_white_alpha(150));
+                    }
+                    UpdatePhase::Restarting => {
+                        widgets::label(ui, fp_text::t(lang, Key::UpdRestarting), 12.0, Color32::from_white_alpha(150));
+                    }
+                    UpdatePhase::Offer | UpdatePhase::Failed(_) => {}
+                }
+                let busy = matches!(phase, UpdatePhase::Downloading { .. } | UpdatePhase::Restarting);
+                if !busy {
+                    ui.add_space(4.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let primary = match (manual.is_none(), failed) {
+                            (true, false) => Key::UpdInstall,
+                            (true, true) => Key::UpdTryAgain,
+                            (false, _) => Key::UpdOpenPage,
+                        };
+                        if widgets::primary_button(ui, &tk, fp_text::t(lang, primary), true).clicked() {
+                            if manual.is_none() {
+                                install = true;
+                            } else {
+                                open = true;
+                            }
+                        }
+                        ui.add_space(10.0);
+                        if widgets::quiet_button(ui, &tk, fp_text::t(lang, Key::UpdLater), 36.0, true).clicked() {
+                            later = true;
+                        }
+                    });
+                }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     later = true;
                 }
             });
         });
-        if open {
+        if notes || open {
             self.actions.push(CardAction::OpenUrl(c.url.clone()));
+        }
+        if install {
+            self.actions.push(CardAction::InstallUpdate);
         }
         if later || open {
             // Closing without accepting counts as "later" again.
@@ -1596,6 +1726,24 @@ mod tests {
         let mut c = Cards::new(2);
         c.open(CardRequest::Quote { at: Vec2::new(10.0, 10.0), quote: 10_000 }, &cx(&l, &[]), 0.0);
         assert!(c.quote.is_some());
+    }
+
+    #[test]
+    fn update_card_state() {
+        let l = layout();
+        let mut c = Cards::new(3);
+        assert_eq!(c.update_phase(), UpdatePhase::Offer);
+        assert!(!c.update_open());
+        c.set_update_manual(Some(fp_text::ManualReason::Package));
+        c.set_update_phase(UpdatePhase::Downloading { done: 1, total: 2 });
+        c.open_update("9.9.9", "https://example.org/r", &cx(&l, &[]), 0.0);
+        assert!(c.update_open());
+        assert_eq!(c.update_phase(), UpdatePhase::Downloading { done: 1, total: 2 });
+        for f in [UpdateFail::Network, UpdateFail::Verify, UpdateFail::Install] {
+            assert_ne!(fp_text::t(Lang::En, fail_key(f)), "");
+        }
+        c.close_all();
+        assert!(!c.update_open());
     }
 
     /// Every card draws a frame headlessly (non-embedded viewports run their

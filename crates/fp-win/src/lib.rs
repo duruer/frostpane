@@ -31,6 +31,8 @@ pub mod overlay;
 #[cfg(windows)]
 pub mod sprites;
 #[cfg(windows)]
+pub mod update;
+#[cfg(windows)]
 pub mod windows_impl;
 
 /// The Windows backends: `Win` services, layered sprite windows and the
