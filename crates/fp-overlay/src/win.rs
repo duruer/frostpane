@@ -440,6 +440,9 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
             next = Instant::now();
             continue;
         }
+        if work.main == Job::Draw {
+            gpu.warm_families(&main_list);
+        }
         let list = match work.main {
             Job::Draw => Some(&main_list),
             _ => None,

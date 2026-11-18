@@ -60,6 +60,31 @@ fn entry(kind: PassKind) -> Entry {
     Entry { module, vs, fs, storage }
 }
 
+/// Every pass kind, in [`PassKind`] order.
+pub const KINDS: [PassKind; 10] = [
+    PassKind::SnowDrift,
+    PassKind::SnowFlakes,
+    PassKind::SnowLoose,
+    PassKind::RainFlash,
+    PassKind::RainRipples,
+    PassKind::RainStrokes,
+    PassKind::Petals,
+    PassKind::StarTrails,
+    PassKind::Stars,
+    PassKind::Fireflies,
+];
+
+/// The pass kinds one weather draws, so all of them can be built as soon as
+/// the first one shows up.
+pub fn family(kind: PassKind) -> &'static [PassKind] {
+    match kind {
+        PassKind::SnowDrift | PassKind::SnowFlakes | PassKind::SnowLoose => &KINDS[0..3],
+        PassKind::RainFlash | PassKind::RainRipples | PassKind::RainStrokes => &KINDS[3..6],
+        PassKind::Petals => &KINDS[6..7],
+        PassKind::StarTrails | PassKind::Stars | PassKind::Fireflies => &KINDS[7..10],
+    }
+}
+
 /// Storage buffers a pass kind binds (bindings 2..).
 pub fn storage_count(kind: PassKind) -> usize {
     entry(kind).storage
@@ -93,6 +118,8 @@ pub struct Gpu {
     pipeline_layouts: Vec<wgpu::PipelineLayout>,
     modules: Mutex<HashMap<Module, wgpu::ShaderModule>>,
     pipelines: Mutex<HashMap<PassKind, Arc<wgpu::RenderPipeline>>>,
+    /// First kind of every family whose pipelines are built or being built.
+    warmed: Mutex<Vec<PassKind>>,
 }
 
 /// Shader-visible descriptors the overlay device reserves. Each pass slot
@@ -164,6 +191,7 @@ impl Gpu {
             pipeline_layouts,
             modules: Mutex::new(HashMap::new()),
             pipelines: Mutex::new(HashMap::new()),
+            warmed: Mutex::new(Vec::new()),
         }
     }
 
@@ -200,6 +228,37 @@ impl Gpu {
     }
 
     /// The pipeline of a pass kind, built on first use.
+    /// Builds the pipelines of every family `list` draws on a background
+    /// thread, once per family. A pass kind first seen mid-run (the ground
+    /// drift once snow piles up, loose snow on the first sweep) otherwise
+    /// compiles its shaders on the render thread and drops frames. Only the
+    /// families in use are built: all of them cost about 40 MB.
+    pub fn warm_families(self: &Arc<Self>, list: &DrawList) {
+        let mut new = Vec::new();
+        {
+            let mut warmed = lock(&self.warmed);
+            for pass in &list.passes {
+                let fam = family(pass.kind);
+                if !warmed.contains(&fam[0]) {
+                    warmed.push(fam[0]);
+                    new.push(fam);
+                }
+            }
+        }
+        if new.is_empty() {
+            return;
+        }
+        let g = self.clone();
+        let spawned = std::thread::Builder::new().name("frostpane overlay warm-up".into()).spawn(move || {
+            for kind in new.into_iter().flatten() {
+                g.pipeline(*kind);
+            }
+        });
+        if let Err(e) = spawned {
+            log::warn!("overlay: pipeline warm-up thread failed: {e}");
+        }
+    }
+
     pub fn pipeline(&self, kind: PassKind) -> Arc<wgpu::RenderPipeline> {
         if let Some(p) = lock(&self.pipelines).get(&kind) {
             return p.clone();
@@ -838,19 +897,37 @@ mod tests {
     }
 
     #[test]
+    fn families_cover_every_kind_once() {
+        for kind in KINDS {
+            assert!(family(kind).contains(&kind));
+        }
+        let firsts = KINDS.iter().filter(|k| family(**k)[0] == **k).count();
+        assert_eq!(firsts, 4);
+    }
+
+    #[test]
+    fn warm_families_builds_a_family_once() {
+        // Its own device: the shared test device must not race other tests.
+        let Ok(own) = Gpu::headless().map(Arc::new) else { return };
+        let mut d = list();
+        d.instanced(PassKind::RainRipples, vec![], &[RainRipple::default()]);
+        own.warm_families(&d);
+        own.warm_families(&d);
+        assert_eq!(*lock(&own.warmed), vec![PassKind::RainFlash]);
+        // The background thread builds the whole rain family.
+        for _ in 0..500 {
+            if lock(&own.pipelines).len() == 3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let built = lock(&own.pipelines);
+        assert!(family(PassKind::RainFlash).iter().all(|k| built.contains_key(k)));
+    }
+
+    #[test]
     fn entries_cover_every_kind() {
-        let kinds = [
-            PassKind::SnowDrift,
-            PassKind::SnowFlakes,
-            PassKind::SnowLoose,
-            PassKind::RainFlash,
-            PassKind::RainRipples,
-            PassKind::RainStrokes,
-            PassKind::Petals,
-            PassKind::StarTrails,
-            PassKind::Stars,
-            PassKind::Fireflies,
-        ];
+        let kinds = KINDS;
         assert_eq!(kinds.iter().map(|k| storage_count(*k)).sum::<usize>(), 10);
         assert_eq!(blend_state(kinds[0].blend()).color.dst_factor, wgpu::BlendFactor::OneMinusSrcAlpha);
         assert_eq!(blend_state(PassKind::Stars.blend()).color.dst_factor, wgpu::BlendFactor::One);
