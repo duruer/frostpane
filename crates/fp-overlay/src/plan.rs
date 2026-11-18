@@ -92,6 +92,39 @@ pub fn padded_len(len: usize) -> usize {
     len.next_multiple_of(4)
 }
 
+/// The bytes of one frame packed for a single upload: every binding at an
+/// aligned offset, each followed by its reserved slack, so one
+/// `write_buffer` per frame replaces one per binding (each write allocates a
+/// staging buffer, the main CPU cost of a frame on DX12).
+#[derive(Debug, Default)]
+pub struct Packer {
+    bytes: Vec<u8>,
+}
+
+impl Packer {
+    /// Starts a new frame (keeps the allocation).
+    pub fn clear(&mut self) {
+        self.bytes.clear();
+    }
+
+    /// Places `data` at the next multiple of `align` and reserves `reserve`
+    /// bytes for it (at least the data, padded to 4). Returns the binding's
+    /// `(offset, size)`; the size is the reservation.
+    pub fn place(&mut self, data: &[u8], reserve: u64, align: u64) -> (u64, u64) {
+        let offset = (self.bytes.len() as u64).next_multiple_of(align.max(4));
+        let size = reserve.max(padded_len(data.len()) as u64);
+        self.bytes.resize(offset as usize, 0);
+        self.bytes.extend_from_slice(data);
+        self.bytes.resize((offset + size) as usize, 0);
+        (offset, size)
+    }
+
+    /// The packed frame (a multiple of 4 bytes long).
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 /// Floats of the per-pass uniform block (4 x vec4).
 pub const UNIFORM_FLOATS: usize = 16;
 
@@ -355,5 +388,21 @@ mod tests {
         s.at(0.0, 0.1, t1, Act::PlaceBehind);
         s.at(0.0, 0.1, t2, Act::AttachAbove);
         assert_eq!(s.due(1.0), vec![Act::AttachAbove]);
+    }
+
+    #[test]
+    fn packer_aligns_and_reserves() {
+        let mut p = Packer::default();
+        assert_eq!(p.place(&[1, 2, 3, 4], 0, 256), (0, 4));
+        // Next binding at the alignment; the reservation exceeds the data.
+        assert_eq!(p.place(&[5; 6], 512, 256), (256, 512));
+        // Odd data is padded to 4 when the reservation is smaller.
+        assert_eq!(p.place(&[7; 5], 0, 0), (768, 8));
+        assert_eq!(p.bytes().len(), 776);
+        assert_eq!(&p.bytes()[256..263], &[5, 5, 5, 5, 5, 5, 0]);
+        assert_eq!(p.bytes()[768..776], [7, 7, 7, 7, 7, 0, 0, 0]);
+        p.clear();
+        assert!(p.bytes().is_empty());
+        assert_eq!(p.place(&[], 16, 256), (0, 16));
     }
 }
