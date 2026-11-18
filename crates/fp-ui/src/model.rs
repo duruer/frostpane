@@ -176,6 +176,13 @@ pub fn home_height(work_height: f32) -> f32 {
     (0.9 * work_height).min(735.0)
 }
 
+/// True when the window's inner size (points) is off the size it was fitted
+/// to by more than rounding: the fixed-size window was resized by something
+/// else (a scale change mid-drag between monitors).
+pub fn size_drifted(actual: (f32, f32), want: (f32, f32)) -> bool {
+    (actual.0 - want.0).abs() > 1.5 || (actual.1 - want.1).abs() > 1.5
+}
+
 /// New top-left when the window changes size while visible: keep the centre,
 /// top at least the work-area top; unchanged when both deltas are < 0.5.
 pub fn fit(pos: (f32, f32), old: (f32, f32), new: (f32, f32), work_top: f32) -> (f32, f32) {

@@ -366,6 +366,18 @@ fn ground_clock_restarts_runs_at_30fps_and_settles() {
 }
 
 #[test]
+fn size_drift_ignores_rounding_only() {
+    use crate::model::size_drifted;
+    assert!(!size_drifted((1078.0, 735.0), (1078.0, 735.0)));
+    // Physical pixels rounded at 175 %: under a point off.
+    assert!(!size_drifted((1077.7, 735.4), (1078.0, 735.0)));
+    // Shrunk by the scale (dragged onto a 175 % screen) or grown by it.
+    assert!(size_drifted((616.0, 420.0), (1078.0, 735.0)));
+    assert!(size_drifted((1887.0, 1286.0), (1078.0, 735.0)));
+    assert!(size_drifted((1078.0, 700.0), (1078.0, 735.0)));
+}
+
+#[test]
 fn fit_plan_uses_the_work_area_holding_the_window() {
     let rect = |x0, y0, x1, y1| egui::Rect::from_min_max(pos2(x0, y0), pos2(x1, y1));
     let mut r = Rig::new(true);

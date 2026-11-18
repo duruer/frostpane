@@ -172,6 +172,9 @@ pub struct Shell {
     pub(crate) pointer_warning: bool,
     pub(crate) sheet: Option<Sheet>,
     pub(crate) screen: Option<Screen>,
+    /// Inner size (points) the window was last fitted to; the window is not
+    /// resizable, so any other size is drift (see [`Shell::keep_size`]).
+    pub(crate) fitted: Option<(f32, f32)>,
     pub(crate) badge: bool,
     pub(crate) tab_pill: Option<(f32, f32)>,
     pub(crate) groundlife: art::Animated,
@@ -220,6 +223,7 @@ impl Shell {
             pointer_warning: false,
             sheet: None,
             screen: None,
+            fitted: None,
             badge,
             tab_pill: None,
             groundlife: art::Animated::default(),
@@ -413,6 +417,7 @@ impl Shell {
             }
             self.screen = Some(screen);
         }
+        self.keep_size(&ctx, screen);
         self.tk = Tokens::new(model::screen_is_dark(screen));
         // Ctrl+W hides, Ctrl+Q quits (exactly Ctrl held).
         let (w_key, q_key) = ctx.input(|i| {
@@ -449,8 +454,26 @@ impl Shell {
         let (old, outer) = ctx.input(|i| (i.viewport().inner_rect, i.viewport().outer_rect));
         let (target, pos) = self.fit_plan(screen, old, outer, monitor_h);
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(target.0, target.1)));
+        self.fitted = Some(target);
         if let Some((x, y)) = pos {
             ctx.send_viewport_cmd(ViewportCommand::OuterPosition(pos2(x, y)));
+        }
+    }
+
+    /// Put the fixed window size back after it drifted. Dragging the window
+    /// between monitors with different scaling can leave it resized by the
+    /// wrong factor (shrunk or doubled), because the scale change and our
+    /// fixed size disagree mid-drag. Once the drag is over (no button held),
+    /// the size the window was fitted to is requested again at the current
+    /// scale.
+    fn keep_size(&mut self, ctx: &egui::Context, screen: Screen) {
+        let want = self.fitted.or((screen == Screen::Onboarding).then_some(onboarding::WINDOW));
+        let (inner, held) = ctx.input(|i| (i.viewport().inner_rect, i.pointer.any_down()));
+        if let (Some(want), Some(inner)) = (want, inner)
+            && !held
+            && model::size_drifted((inner.width(), inner.height()), want)
+        {
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(want.0, want.1)));
         }
     }
 
