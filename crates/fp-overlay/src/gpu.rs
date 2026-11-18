@@ -761,6 +761,9 @@ mod tests {
             alpha: 1.0,
             soft: 0.5,
             gone: 1e9,
+            shape: 0.0,
+            spin: 0.0,
+            wobble: 0.0,
         };
         let mut d = list();
         d.instanced(PassKind::SnowFlakes, vec![0.5, 0.0, 0.0, W as f32, 30.0], &[flake]);
@@ -791,6 +794,47 @@ mod tests {
         let mut d = list();
         d.instanced(PassKind::SnowFlakes, vec![0.5, 0.0, 0.0, W as f32, 30.0], &[edge]);
         assert_eq!(g.render_image(W, H, &d).covered(0), 0, "margin 30 wraps it off screen");
+    }
+
+    #[test]
+    fn flake_shapes_stay_inside_and_tumble() {
+        let Some(g) = gpu() else { return };
+        // A still, large flake of every kind (speck, clump, crystal, bokeh).
+        let still = |shape: f32, now: f32| {
+            let f = SnowFlake {
+                x: 50.0,
+                top: 50.0,
+                born: 0.0,
+                fall: 0.0,
+                drift: 0.0,
+                wind_at_birth: 0.0,
+                phase: 0.0,
+                sway_rate: 1.0,
+                sway: 0.0,
+                size: 24.0,
+                alpha: 1.0,
+                soft: 0.3,
+                gone: 1e9,
+                shape,
+                spin: 1.0,
+                wobble: 0.4,
+            };
+            let mut d = list();
+            d.instanced(PassKind::SnowFlakes, vec![now, 0.0, 0.0, W as f32, 30.0], &[f]);
+            g.render_image(W, H, &d)
+        };
+        for shape in [0.3, 1.3, 2.3, 3.3] {
+            let img = still(shape, 0.0);
+            assert!(at(&img, 50, 50) > 150, "kind {shape} has a solid middle");
+            for (x, y) in [(50, 85), (50, 15), (15, 50), (85, 50)] {
+                assert_eq!(at(&img, x, y), 0, "kind {shape} stays near its disc");
+            }
+            // It turns: a later frame differs, but keeps about its weight.
+            let later = still(shape, 1.5);
+            assert_ne!(img, later, "kind {shape} tumbles");
+            let (a, b) = (img.covered(8) as f32, later.covered(8) as f32);
+            assert!((a - b).abs() < 0.5 * a.max(b), "kind {shape}: {a} vs {b} covered px");
+        }
     }
 
     #[test]

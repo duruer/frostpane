@@ -118,6 +118,73 @@ fn flake_position_wraps_and_falls() {
 }
 
 #[test]
+fn look_leaves_the_field_rng_alone() {
+    use fp_core::rng::Rng;
+    // A big flake draws 8 values and a normal one 9; the look draws none,
+    // so motion, size and landing sequences are what they were before.
+    let mut r = rng(21);
+    for _ in 0..500 {
+        let mut expect = r.clone();
+        let fl = Flake::spawn(&mut r, 800.0, 600.0, 100.0, 0.0, 0.0, false);
+        for _ in 0..if fl.settles { 9 } else { 8 } {
+            expect.next_u64();
+        }
+        assert_eq!(r, expect);
+    }
+    // Same seed, same look.
+    let a = Flake::spawn(&mut rng(22), 800.0, 600.0, 100.0, 0.0, 0.0, false);
+    let b = Flake::spawn(&mut rng(22), 800.0, 600.0, 100.0, 0.0, 0.0, false);
+    assert_eq!((a.shape, a.spin, a.wobble), (b.shape, b.spin, b.wobble));
+}
+
+#[test]
+fn look_kinds_follow_size_and_reduce_motion_calms_the_tumble() {
+    use crate::flake::{BOKEH, CLUMP, CRYSTAL, SPECK};
+    for reduce in [false, true] {
+        let mut r = rng(23);
+        let mut seen = [0usize; 4];
+        let (mut spin, mut wobble) = (0.0f64, 0.0f64);
+        let (mut left, mut right) = (0, 0);
+        for _ in 0..4000 {
+            let fl = Flake::spawn(&mut r, 800.0, 600.0, 100.0, 0.0, 0.0, reduce);
+            let kind = fl.shape.floor();
+            let seed = fl.shape - kind;
+            assert!((0.0..1.0).contains(&seed));
+            assert_eq!((fl.shape as f32).floor(), kind as f32, "kind survives f32");
+            if !fl.settles {
+                assert_eq!(kind, BOKEH);
+            } else if fl.size < 2.4 {
+                assert_eq!(kind, SPECK);
+            } else {
+                assert!(kind == CLUMP || kind == CRYSTAL);
+            }
+            if kind == CRYSTAL {
+                assert!(fl.size > 3.6, "crystals only on nearer, larger flakes");
+            }
+            seen[kind as usize] += 1;
+            spin = spin.max(fl.spin.abs());
+            wobble = wobble.max(fl.wobble);
+            assert!(fl.spin != 0.0 && fl.wobble > 0.0);
+            if fl.spin < 0.0 {
+                left += 1
+            } else {
+                right += 1
+            }
+            let g = fl.to_gpu();
+            assert_eq!((g.shape, g.spin, g.wobble), (fl.shape as f32, fl.spin as f32, fl.wobble as f32));
+        }
+        assert!(seen.iter().all(|n| *n > 20), "every kind shows up: {seen:?}");
+        assert!(seen[CRYSTAL as usize] < seen[CLUMP as usize], "crystals are the rarer near flakes");
+        assert!(left > 1000 && right > 1000, "both spin directions");
+        if reduce {
+            assert!(spin <= 1.6 * 0.3 + 1e-9 && wobble <= 0.4 * 0.4 + 1e-9);
+        } else {
+            assert!(spin > 1.0 && wobble > 0.3);
+        }
+    }
+}
+
+#[test]
 fn rebase_keeps_wind_continuous() {
     let mut f = field(5);
     f.set_wind(Wind::StrongRight);
