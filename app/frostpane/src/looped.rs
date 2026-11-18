@@ -20,8 +20,12 @@ pub type TickSlot = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
 /// 64 Hz.
 const PERIOD: Duration = Duration::from_micros(15_625);
 
-/// The next wake-up: eframe's own (if any) or our next tick, whichever is first.
-fn merged(flow: ControlFlow, next_tick: Instant) -> ControlFlow {
+/// The next wake-up: eframe's own (if any) or our next tick, whichever is
+/// first. `None`: the slot is empty (the platform's driver ticks, macOS),
+/// so eframe's flow stays as it is and an idle app does not wake 64 times a
+/// second for nothing.
+fn merged(flow: ControlFlow, next_tick: Option<Instant>) -> ControlFlow {
+    let Some(next_tick) = next_tick else { return flow };
     match flow {
         ControlFlow::Poll => ControlFlow::Poll,
         ControlFlow::Wait => ControlFlow::WaitUntil(next_tick),
@@ -75,7 +79,9 @@ impl ApplicationHandler<UserEvent> for Wrap<'_> {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.app.about_to_wait(el);
-        el.set_control_flow(merged(el.control_flow(), self.next));
+        // A borrowed slot is a tick in progress: it still holds a tick.
+        let ticking = self.tick.try_borrow().map_or(true, |s| s.is_some());
+        el.set_control_flow(merged(el.control_flow(), ticking.then_some(self.next)));
     }
 
     fn suspended(&mut self, el: &ActiveEventLoop) {
@@ -107,6 +113,13 @@ pub fn run(
     }
     #[cfg(not(target_os = "linux"))]
     let _ = ui_x11;
+    // A menu bar agent: no Dock icon and no app menu, also when started
+    // outside the bundle (whose Info.plist sets LSUIElement).
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        builder.with_activation_policy(ActivationPolicy::Accessory);
+    }
     let event_loop = builder.build().map_err(eframe::Error::WinitEventLoop)?;
     let app = eframe::create_native(name, opts, creator, &event_loop);
     let mut wrap = Wrap { app, tick, next: Instant::now() };
@@ -121,9 +134,13 @@ mod tests {
     fn wake_ups_merge() {
         let t = Instant::now() + Duration::from_secs(1);
         let early = Instant::now();
-        assert_eq!(merged(ControlFlow::Poll, t), ControlFlow::Poll);
-        assert_eq!(merged(ControlFlow::Wait, t), ControlFlow::WaitUntil(t));
-        assert_eq!(merged(ControlFlow::WaitUntil(early), t), ControlFlow::WaitUntil(early));
-        assert_eq!(merged(ControlFlow::WaitUntil(t + PERIOD), t), ControlFlow::WaitUntil(t));
+        let tick = Some(t);
+        assert_eq!(merged(ControlFlow::Poll, tick), ControlFlow::Poll);
+        assert_eq!(merged(ControlFlow::Wait, tick), ControlFlow::WaitUntil(t));
+        assert_eq!(merged(ControlFlow::WaitUntil(early), tick), ControlFlow::WaitUntil(early));
+        assert_eq!(merged(ControlFlow::WaitUntil(t + PERIOD), tick), ControlFlow::WaitUntil(t));
+        // An empty slot never adds a wake-up.
+        assert_eq!(merged(ControlFlow::Wait, None), ControlFlow::Wait);
+        assert_eq!(merged(ControlFlow::WaitUntil(t), None), ControlFlow::WaitUntil(t));
     }
 }
