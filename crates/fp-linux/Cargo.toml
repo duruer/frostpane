@@ -1,15 +1,22 @@
 [package]
 name = "fp-linux"
-description = "Frostpane Linux session services shared by the X11 and Wayland backends: data folder, language, time zone, UTC offset (later D-Bus: logind, UPower, portal, autostart, wallpaper)."
+description = "Frostpane Linux session services shared by the X11 and Wayland backends: single instance, system events over D-Bus (logind, UPower, power profiles, portal), autostart, wallpaper, xdg-open, language, time zone, data folder."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-or-later"
 publish = false
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 fp-platform.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fp-core.workspace = true
+fp-tracker.workspace = true
 libc.workspace = true
+log.workspace = true
+zbus = "5.19.0"
 
 [lints]
 workspace = true
