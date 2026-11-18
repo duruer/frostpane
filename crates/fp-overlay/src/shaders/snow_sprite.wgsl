@@ -206,7 +206,7 @@ fn flake_shape(i: VOut, d: vec2<f32>, head: f32) -> vec4<f32> {
             let glow = 1.0 - smoothstep(0.0, 1.0, r / 0.76);
             let show = smoothstep(5.0, 12.0, pixels);
             let blob = 1.0 - smoothstep(inner, 1.0, mix(r, sd + 1.0, detail));
-            a = mix(blob, max(star * 0.42, glow * 0.92), show);
+            a = mix(blob, max(star * 0.26, glow * 0.92), show);
             shade = mix(shade, 0.35 * smoothstep(0.25, 0.9, r), show);
         }
     } else {
