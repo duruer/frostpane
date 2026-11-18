@@ -1,7 +1,8 @@
 //! The app state and its wiring: everything that is not the eframe loop.
 //!
-//! One [`Core`] lives on the UI thread. The driver timer (about 64 Hz, a
-//! hidden Win32 window of `fp-win`) calls [`Core::tick`], so the tracker, the
+//! One [`Core`] lives on the UI thread. The driver timer (about 64 Hz; on
+//! Windows a hidden Win32 window of `fp-win`, elsewhere the event loop
+//! wrapper of `main`) calls [`Core::tick`], so the tracker, the
 //! world and the object windows keep running while the main window is
 //! hidden. The eframe loop calls [`Core::logic`] and [`Core::ui`].
 
@@ -25,14 +26,13 @@ use fp_core::surface::ScreenSnap;
 use fp_layered::LayeredHost;
 use fp_net::Worker;
 use fp_overlay::OverlayHost;
+use fp_platform::{Guard, Platform, Services, Shell as Os, SleepState, SystemClock, SystemEvent};
 use fp_sources::season;
 use fp_sources::update;
 use fp_tracker::{HookEvent, PollInput, Tracker, select_screens};
 use fp_ui::eframe::egui;
 use fp_ui::model::DisplayInfo;
 use fp_ui::{CardAction, CardCtx, Cards, HostInfo, Shell, Tray, TrayAction, UiAction, UpdateLine};
-use fp_win::windows_impl::{HookSet, SystemWatcher, Win};
-use fp_win::{Platform, Shell as Os, SleepState, SystemClock, SystemEvent};
 use fp_world::{CardRequest, Command, World, WorldInput, WorldOutput};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -75,6 +75,10 @@ pub struct Config {
     pub open_request: Arc<AtomicBool>,
     /// Open the decoration picker shortly after start (smoke runs).
     pub demo_cards: bool,
+    /// The platform backends (see `platform.rs`).
+    pub services: Rc<dyn Services>,
+    pub sprites: Box<dyn fp_platform::sprites::SpriteBackend>,
+    pub overlay: crate::platform::MakeOverlay,
 }
 
 /// Events from the system watcher, drained by the next tick.
@@ -101,7 +105,9 @@ pub struct Core {
     ctx: egui::Context,
     args: Args,
     started: Instant,
-    platform: Win,
+    platform: Rc<dyn Services>,
+    /// Builds the overlay for a monitor list (platform backend).
+    make_overlay: crate::platform::MakeOverlay,
     data_dir: PathBuf,
     prefs: Prefs,
     weathers: Weathers,
@@ -127,9 +133,9 @@ pub struct Core {
     hooks_rx: Receiver<HookEvent>,
     /// Generated wallpaper packs are being drawn; the count arrives when done.
     packs_rx: Option<Receiver<usize>>,
-    hooks: Option<HookSet>,
+    hooks: Option<Guard>,
     system: SystemQueue,
-    watcher: Option<SystemWatcher>,
+    watcher: Option<Guard>,
     sleep: SleepState,
     open_request: Arc<AtomicBool>,
     visible: bool,
@@ -171,7 +177,7 @@ const STARTUP_HIDE_FRAMES: u8 = 8;
 
 /// Applies the result of a launch-at-login change (core-app 2.10): a failed
 /// enable shows the note; only a user block opens Windows Startup Apps.
-fn login_result<O: Os>(os: &O, shell: &mut Shell, on: bool, ok: bool) {
+fn login_result<O: Os + ?Sized>(os: &O, shell: &mut Shell, on: bool, ok: bool) {
     if on && !ok {
         let blocked = os.login_blocked();
         shell.login_failed(blocked);
@@ -187,7 +193,7 @@ fn login_result<O: Os>(os: &O, shell: &mut Shell, on: bool, ok: bool) {
 /// icon rect lies inside the taskbar window; the result is true only when it
 /// opened and Windows has the icon promoted (otherwise the overflow warning
 /// must show).
-fn tray_pointer<O: Os>(os: &O, rect: Option<[f64; 4]>, open: impl FnOnce([f64; 4]) -> bool) -> bool {
+fn tray_pointer<O: Os + ?Sized>(os: &O, rect: Option<[f64; 4]>, open: impl FnOnce([f64; 4]) -> bool) -> bool {
     let promoted = os.tray_icon_promoted();
     let Some(rect) = rect else { return false };
     let px = PixelRect::new(
@@ -204,7 +210,7 @@ fn tray_pointer<O: Os>(os: &O, rect: Option<[f64; 4]>, open: impl FnOnce([f64; 4
 
 /// Re-reads the OS login state on window activation while the blocked note
 /// shows (ui 3.5 Hooks).
-fn recheck_login<O: Os>(os: &O, shell: &mut Shell, activated: bool) {
+fn recheck_login<O: Os + ?Sized>(os: &O, shell: &mut Shell, activated: bool) {
     if activated && shell.login_recheck_wanted() {
         shell.login_state(os.login_is_on());
     }
@@ -438,7 +444,7 @@ impl Core {
     /// `main`; here come the language, world, tray, hooks and watchers,
     /// sources, day-and-night, and the overlay when a weather is shown.
     pub fn new(ctx: egui::Context, cfg: Config, quiet_start: bool, lang: Lang, settings: Settings) -> Self {
-        let platform = Win;
+        let platform = cfg.services;
         let power = platform.power();
         let monitors = platform.monitors();
         let layout = Layout::new(monitors.clone());
@@ -448,21 +454,24 @@ impl Core {
             .map_or(1, |d| d.as_nanos() as u64 ^ u64::from(std::process::id()));
         let feed = Arc::new(SnowFeed::new());
         let world = World::new(feed.clone(), cfg.prefs.map(), mix_seed(seed));
-        let clock = SystemClock::default();
+        let clock = {
+            let p = platform.clone();
+            SystemClock::new(move || p.utc_offset_s())
+        };
         let now = clock.now();
 
         let packs_wake = ctx.clone();
         let packs_rx =
             crate::packs::spawn_ensure(&cfg.data_dir.join("Wallpapers"), move || packs_wake.request_repaint());
         let (hook_tx, hooks_rx) = channel();
-        let hooks = HookSet::install(hook_tx);
+        let hooks = platform.hooks(hook_tx);
         let system = Rc::new(RefCell::new(Vec::new()));
         let sink = system.clone();
         let wake = ctx.clone();
-        let watcher = SystemWatcher::new(move |e, asleep| {
+        let watcher = platform.watch(Box::new(move |e, asleep| {
             sink.borrow_mut().push((e, asleep));
             wake.request_repaint();
-        });
+        }));
 
         let worker_wake = ctx.clone();
         let sources =
@@ -481,7 +490,7 @@ impl Core {
             cards: Cards::new(seed),
             overlay: None,
             overlay_failed: false,
-            layered: LayeredHost::new(),
+            layered: LayeredHost::new(cfg.sprites),
             feed,
             world,
             out: WorldOutput::default(),
@@ -495,7 +504,7 @@ impl Core {
             seed,
             hooks_rx,
             packs_rx,
-            hooks: (hooks.count() > 0).then_some(hooks),
+            hooks,
             system,
             watcher,
             sleep: SleepState::default(),
@@ -526,6 +535,7 @@ impl Core {
             last_frames: 0,
             ticks: 0,
             platform,
+            make_overlay: cfg.overlay,
             ctx: ctx.clone(),
         };
         core.shell = Shell::new(core.host_info());
@@ -533,7 +543,7 @@ impl Core {
         let wake = ctx.clone();
         match Tray::new(&core.weathers, lang, move || wake.request_repaint()) {
             Ok(mut t) => {
-                t.set_light_taskbar(Os::taskbar_light(&core.platform));
+                t.set_light_taskbar(Os::taskbar_light(&*core.platform));
                 if let Err(e) = t.refresh(&core.weathers, lang) {
                     log::warn!("tray refresh failed: {e}");
                 }
@@ -554,7 +564,7 @@ impl Core {
             displays: displays(&self.monitors, self.lang),
             wallpapers_dir: self.data_dir.join("Wallpapers"),
             day_pack: self.prefs.get_str(wallpaper::KEY_PACK).map(str::to_string),
-            login_on: Os::login_is_on(&self.platform),
+            login_on: Os::login_is_on(&*self.platform),
             seen_changelog: self.prefs.get_str(KEY_SEEN_CHANGELOG).map(str::to_string),
             custom_chrome: true,
             decoder: Some(Arc::new(crate::decode::decode)),
@@ -597,6 +607,12 @@ impl Core {
             }
             return;
         }
+        // Backends without a UI-thread timer leave the staged steps to us.
+        if let Some(o) = &self.overlay
+            && o.needs_tick()
+        {
+            o.tick();
+        }
         self.drain_tray();
         if packs_done(&mut self.packs_rx) {
             let host = self.host_info();
@@ -627,7 +643,7 @@ impl Core {
             self.rebuild_displays();
         }
         if !self.sleep.asleep() {
-            self.shelves.step(now, || Win.taskbar_shelves());
+            self.shelves.step(now, self.platform.shelves_reader());
         }
         self.poll_tracker(now);
         if now >= self.next_keep {
@@ -645,7 +661,7 @@ impl Core {
             self.next_daynight = now + wallpaper::EVERY_S;
             let packs = self.data_dir.join("Wallpapers");
             let dirs = Dirs { data: &self.data_dir, packs: &packs };
-            let action = self.wallpaper.step(&self.platform, &dirs, &mut self.prefs, wall.local_minutes());
+            let action = self.wallpaper.step(&*self.platform, &dirs, &mut self.prefs, wall.local_minutes());
             tell_cycle_step(&mut self.shell, &action);
         }
     }
@@ -692,7 +708,7 @@ impl Core {
     }
 
     fn read_taskbar_theme(&mut self) {
-        let light = Os::taskbar_light(&self.platform);
+        let light = Os::taskbar_light(&*self.platform);
         if let Some(t) = self.tray.as_mut() {
             t.set_light_taskbar(light);
         }
@@ -716,7 +732,7 @@ impl Core {
                 Ok(()) => {
                     // New panels re-read reduced motion (desktop-native 3.7).
                     if let Some(kind) = self.weathers.shown_weather() {
-                        let (rm, f) = motion_factory(&self.platform, kind, self.feed.clone(), self.seed);
+                        let (rm, f) = motion_factory(&*self.platform, kind, self.feed.clone(), self.seed);
                         self.reduce_motion = rm;
                         o.set_effect(Some(f));
                     }
@@ -746,7 +762,7 @@ impl Core {
         match shown {
             Some(kind) => {
                 if self.overlay.is_none() && !self.overlay_failed {
-                    match OverlayHost::new(&self.monitors) {
+                    match (self.make_overlay)(&self.monitors) {
                         Ok(o) => {
                             self.overlay = Some(o);
                             self.pushed = Pushed::default();
@@ -759,7 +775,7 @@ impl Core {
                     }
                 }
                 if let Some(o) = &self.overlay {
-                    let (rm, f) = motion_factory(&self.platform, kind, self.feed.clone(), self.seed);
+                    let (rm, f) = motion_factory(&*self.platform, kind, self.feed.clone(), self.seed);
                     self.reduce_motion = rm;
                     o.set_effect(Some(f));
                 }
@@ -893,7 +909,7 @@ impl Core {
         };
         self.world.step(&input, &mut self.out);
         if let Some((id, _)) = self.out.decor_menu.take()
-            && let Some(cmd) = decor_menu_command(&self.platform, self.lang, self.cursor, id)
+            && let Some(cmd) = decor_menu_command(&*self.platform, self.lang, self.cursor, id)
         {
             self.world.command(cmd, now);
         }
@@ -921,7 +937,13 @@ impl Core {
     /// 3.11, `anywhere = false`).
     fn poll_outside(&mut self, now: f64) {
         let cursor = self.cursor;
-        if self.outside.step(now, self.cards.outside_watch(), outside::buttons_down, || outside::over_own(cursor)) {
+        let platform = &*self.platform;
+        if self.outside.step(
+            now,
+            self.cards.outside_watch(),
+            || outside::buttons_down(platform),
+            || outside::over_own(platform, cursor),
+        ) {
             self.cards.close_outside(self.egui_now());
             self.ctx.request_repaint();
         }
@@ -981,7 +1003,7 @@ impl Core {
             tree_origin: None,
         };
         let cards = &mut self.cards;
-        let shown = tray_pointer(&self.platform, rect, |r| cards.open_pointer(r, &cx, now));
+        let shown = tray_pointer(&*self.platform, rect, |r| cards.open_pointer(r, &cx, now));
         self.ctx.request_repaint();
         shown
     }
@@ -1027,7 +1049,7 @@ impl Core {
         if due.update {
             self.sources.check_update(false);
         }
-        let (settings, platform) = (&self.weathers.settings, &self.platform);
+        let (settings, platform) = (&self.weathers.settings, &*self.platform);
         let events = self.sources.poll(|| season_env(settings, platform, &platform.time_zone_id(), wall));
         for e in events {
             self.on_event(e, wall);
@@ -1035,7 +1057,7 @@ impl Core {
     }
 
     fn season_env(&self, wall: WallTime) -> (u32, bool) {
-        season_env(&self.weathers.settings, &self.platform, &self.platform.time_zone_id(), wall)
+        season_env(&self.weathers.settings, &*self.platform, &self.platform.time_zone_id(), wall)
     }
 
     fn on_event(&mut self, e: Event, wall: WallTime) {
@@ -1253,7 +1275,7 @@ impl Core {
         let activated = focused && !self.focused;
         self.focused = focused;
         if self.visible {
-            recheck_login(&self.platform, &mut self.shell, activated);
+            recheck_login(&*self.platform, &mut self.shell, activated);
         }
         if self.cards.any_open() {
             // Cards draw inside the root `ui`, which a hidden window skips.
@@ -1318,8 +1340,8 @@ impl Core {
             }
             UiAction::SetMainScreen(id) => w.set_main_screen(Some(id)),
             UiAction::SetLaunchAtLogin(on) => {
-                let ok = Os::login_set(&self.platform, on);
-                login_result(&self.platform, &mut self.shell, on, ok);
+                let ok = Os::login_set(&*self.platform, on);
+                login_result(&*self.platform, &mut self.shell, on, ok);
                 Changes::NONE
             }
             UiAction::SetWeather(e) => w.set_weather(e),
@@ -1354,14 +1376,13 @@ impl Core {
                 Changes::NONE
             }
             UiAction::OpenUrl(url) => {
-                Os::open_url(&self.platform, &url);
+                Os::open_url(&*self.platform, &url);
                 Changes::NONE
             }
             UiAction::OpenWallpapersFolder => {
                 let dir = self.data_dir.join("Wallpapers");
                 let _ = std::fs::create_dir_all(&dir);
-                #[cfg(windows)]
-                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                self.platform.open_folder(&dir);
                 Changes::NONE
             }
             UiAction::ShowTrayPointer => {
@@ -1392,7 +1413,7 @@ impl Core {
     fn run_wallpaper(&mut self, a: &fp_ui::wallpapers::WallAction, now: f64, wall: WallTime) {
         let packs = self.data_dir.join("Wallpapers");
         let dirs = Dirs { data: &self.data_dir, packs: &packs };
-        let ok = self.wallpaper.run(a, &self.platform, &dirs, &mut self.prefs, wall.local_minutes());
+        let ok = self.wallpaper.run(a, &*self.platform, &dirs, &mut self.prefs, wall.local_minutes());
         tell_wallpaper_run(&mut self.shell, a, ok, now);
     }
 
@@ -1412,7 +1433,7 @@ impl Core {
                 let at = self.clock.wall().iso_utc();
                 let _ = self.prefs.put(KEY_UPDATE_ASKED, &at);
             }
-            CardAction::OpenUrl(url) => Os::open_url(&self.platform, &url),
+            CardAction::OpenUrl(url) => Os::open_url(&*self.platform, &url),
         }
     }
 
@@ -1460,7 +1481,7 @@ mod tests {
     use super::*;
     use fp_core::geom::PixelRect;
     use fp_core::settings::City;
-    use fp_win::WallpaperScreen;
+    use fp_platform::WallpaperScreen;
 
     #[test]
     fn egui_passes_slow_down_while_nothing_shows() {
@@ -1690,6 +1711,10 @@ mod tests {
         fn wallpaper_current(&self) -> Option<PathBuf> {
             None
         }
+        fn wallpaper_supported(&self) -> bool {
+            true
+        }
+        fn open_folder(&self, _: &std::path::Path) {}
     }
 
     struct LoginOs {
@@ -1736,6 +1761,10 @@ mod tests {
         fn wallpaper_current(&self) -> Option<PathBuf> {
             None
         }
+        fn wallpaper_supported(&self) -> bool {
+            true
+        }
+        fn open_folder(&self, _: &std::path::Path) {}
     }
 
     struct TrayOs {
@@ -1779,6 +1808,10 @@ mod tests {
         fn wallpaper_current(&self) -> Option<PathBuf> {
             None
         }
+        fn wallpaper_supported(&self) -> bool {
+            true
+        }
+        fn open_folder(&self, _: &std::path::Path) {}
     }
 
     fn spot(r: PixelRect, bar: PixelRect) -> Option<PixelRect> {
@@ -2110,8 +2143,8 @@ mod tests {
         fn os_language(&self) -> String {
             "en".into()
         }
-        fn power(&self) -> fp_win::PowerStatus {
-            fp_win::PowerStatus::default()
+        fn power(&self) -> fp_platform::PowerStatus {
+            fp_platform::PowerStatus::default()
         }
         fn reduced_motion(&self) -> bool {
             self.0.get()
@@ -2139,6 +2172,27 @@ mod tests {
         }
         fn window_corner(&self) -> f64 {
             0.0
+        }
+        fn utc_offset_s(&self) -> i32 {
+            0
+        }
+        fn uptime_ms(&self) -> u64 {
+            0
+        }
+        fn over_own(&self, _: (i32, i32)) -> bool {
+            false
+        }
+        fn has_geometry(&self) -> bool {
+            true
+        }
+        fn hooks(&self, _: std::sync::mpsc::Sender<HookEvent>) -> Option<Guard> {
+            None
+        }
+        fn shelves_reader(&self) -> Box<dyn FnOnce() -> Vec<PixelRect> + Send> {
+            Box::new(Vec::new)
+        }
+        fn single_instance(&self, _: bool) -> fp_platform::Instance {
+            fp_platform::Instance::Second
         }
     }
 

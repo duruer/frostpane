@@ -1,5 +1,6 @@
 //! Image decoder for the wallpaper thumbnails (`HostInfo::decoder`): Windows
-//! Imaging Component, scaled to a maximum side, straight-alpha RGBA.
+//! Imaging Component (elsewhere the `image` crate), scaled to a maximum side,
+//! straight-alpha RGBA.
 
 use std::path::Path;
 
@@ -66,10 +67,17 @@ pub fn decode(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
     }
 }
 
-/// No decoder off Windows: the tiles use their drawn pictures.
+/// Off Windows: the `image` crate (PNG, JPEG), same scaling, straight-alpha RGBA.
 #[cfg(not(windows))]
-pub fn decode(_path: &Path, _max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
-    None
+pub fn decode(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let img = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.decode().ok()?;
+    let (nw, nh) = fit_size(img.width(), img.height(), max_side);
+    let img = if (nw, nh) == (img.width(), img.height()) {
+        img
+    } else {
+        img.resize_exact(nw, nh, image::imageops::FilterType::Triangle)
+    };
+    Some((nw, nh, img.into_rgba8().into_raw()))
 }
 
 #[cfg(test)]
@@ -87,6 +95,7 @@ mod tests {
     }
 
     /// 2x2 24-bit BMP: bottom row red, green; top row blue, white.
+    #[cfg(windows)]
     fn bmp() -> Vec<u8> {
         let mut v = b"BM".to_vec();
         let px: [[u8; 3]; 4] = [[0, 0, 255], [0, 255, 0], [255, 0, 0], [255, 255, 255]]; // BGR, bottom-up

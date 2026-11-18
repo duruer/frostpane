@@ -30,7 +30,7 @@ fn main() {
 
     fp_win::windows_impl::set_dpi_awareness();
     let mons = fp_win::windows_impl::Win.monitors();
-    let mut host = OverlayHost::new(&mons).expect("overlay");
+    let mut host = OverlayHost::new(fp_win::overlay::WinOverlay::new(), &mons).expect("overlay");
     println!("panels {}", host.panels());
 
     let pump = |dur: Duration, host: &OverlayHost| {

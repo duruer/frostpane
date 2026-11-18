@@ -1,6 +1,6 @@
 [package]
 name = "fp-win"
-description = "Frostpane Windows platform services: monitors, DPI, window enumeration and hooks, power, single instance, login item, wallpaper, clock."
+description = "Frostpane Windows backend: monitors, DPI, window enumeration and hooks, power, single instance, login item, wallpaper, overlay panels (DirectComposition), layered sprite windows."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,13 +10,17 @@ publish = false
 [dependencies]
 fp-core.workspace = true
 fp-tracker.workspace = true
+fp-platform.workspace = true
 log.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+wgpu.workspace = true
+tiny-skia.workspace = true
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Dwm",
+  "Win32_Graphics_DirectComposition",
   "Win32_Security",
   "Win32_System_Threading",
   "Win32_System_Time",

@@ -29,7 +29,12 @@ fp-decor = { path = "crates/fp-decor" }
 fp-characters = { path = "crates/fp-characters" }
 fp-fight = { path = "crates/fp-fight" }
 fp-world = { path = "crates/fp-world" }
+fp-platform = { path = "crates/fp-platform" }
 fp-win = { path = "crates/fp-win" }
+fp-mac = { path = "crates/fp-mac" }
+fp-x11 = { path = "crates/fp-x11" }
+fp-wayland = { path = "crates/fp-wayland" }
+fp-linux = { path = "crates/fp-linux" }
 fp-layered = { path = "crates/fp-layered" }
 fp-overlay = { path = "crates/fp-overlay" }
 fp-ui = { path = "crates/fp-ui" }
@@ -47,12 +52,15 @@ eframe = "0.37.0"
 egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot"] }
 egui_system_font_provider = { version = "0.37.0", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
-tray-icon = "0.26.1"
-muda = "0.21.2"
+# Default features off: Linux uses the GTK-free StatusNotifierItem tray;
+# every other target turns the defaults back on (crates/fp-ui/Cargo.toml).
+tray-icon = { version = "0.26.1", default-features = false }
+muda = { version = "0.21.2", default-features = false }
 log = "0.4.35"
 ureq = { version = "2.12.1", default-features = false, features = ["native-tls", "json"] }
 native-tls = "0.2"
 windows = "0.62.2"
+libc = "0.2"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

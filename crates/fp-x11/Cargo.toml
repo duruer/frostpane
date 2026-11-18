@@ -1,0 +1,17 @@
+[package]
+name = "fp-x11"
+description = "Frostpane X11 backend (skeleton: null backends until implemented)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fp-platform.workspace = true
+fp-linux.workspace = true
+log.workspace = true
+wgpu = { workspace = true, features = ["vulkan", "gles"] }
+
+[lints]
+workspace = true

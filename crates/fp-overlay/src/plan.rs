@@ -4,6 +4,7 @@
 
 use fp_core::desktop::MonitorInfo;
 use fp_core::{Frame, PixelRect, Vec2};
+pub use fp_platform::overlay::{Seen, creation_dpi, raise_targets, visual_scale};
 
 /// One overlay screen as the effect factory sees it.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,18 +45,6 @@ pub fn panel_infos(monitors: &[MonitorInfo]) -> Vec<PanelInfo> {
 pub fn swap_size(width_pts: f64, height_pts: f64) -> (u32, u32) {
     let f = |v: f64| if v.is_finite() && v > 1.0 { v.ceil().min(16384.0) as u32 } else { 1 };
     (f(width_pts), f(height_pts))
-}
-
-/// Visual scale that stretches the DIP-sized swap chain over the monitor's
-/// pixels (desktop-native 3.2 `SetTransform`).
-pub fn visual_scale(pixels: PixelRect, swap: (u32, u32)) -> (f32, f32) {
-    (pixels.width().max(1) as f32 / swap.0.max(1) as f32, pixels.height().max(1) as f32 / swap.1.max(1) as f32)
-}
-
-/// DPI the panel was created at, for the "rescaled" check (desktop-native 3.1).
-pub fn creation_dpi(scale: f64) -> u32 {
-    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    (s * 96.0).round() as u32
 }
 
 /// Cursor in screen-local points (Y up) when it lies inside the monitor's
@@ -168,33 +157,6 @@ pub fn sit_plan(behind: bool, draws_above: bool, above_ready: bool) -> SitPlan {
 /// panel exists.
 pub fn needs_raise(shown: bool, behind: bool, has_above: bool) -> bool {
     shown && (!behind || has_above)
-}
-
-/// One window met while walking the topmost z-order from the top.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Seen {
-    pub hwnd: isize,
-    pub topmost: bool,
-    pub visible: bool,
-    pub own_thread: bool,
-}
-
-/// `RaisePanels` (3.4): windows to re-apply TOPMOST to, in apply order.
-/// `panels` are the overlay's own panels, `under_dock` the host's windows
-/// that stay below the taskbar.
-pub fn raise_targets(seen: &[Seen], panels: &[isize], under_dock: &[isize]) -> Vec<isize> {
-    let list: Vec<fp_tracker::TopWindow> = seen
-        .iter()
-        .map(|w| fp_tracker::TopWindow {
-            hwnd: w.hwnd as i64,
-            topmost: w.topmost,
-            panel: panels.contains(&w.hwnd),
-            under_dock: under_dock.contains(&w.hwnd),
-            visible: w.visible,
-            own_thread: w.own_thread,
-        })
-        .collect();
-    fp_tracker::raise_list(&list).into_iter().map(|h| h as isize).collect()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -342,9 +304,6 @@ mod tests {
         assert_eq!(swap_size(1920.4, 1080.0), (1921, 1080));
         assert_eq!(swap_size(f64::NAN, 0.0), (1, 1));
         assert_eq!(swap_size(1e9, 20000.0), (16384, 16384));
-        let s = visual_scale(PixelRect::new(0, 0, 3840, 2160), (2560, 1440));
-        assert!((s.0 - 1.5).abs() < 1e-6 && (s.1 - 1.5).abs() < 1e-6);
-        assert_eq!(visual_scale(PixelRect::new(0, 0, 0, 0), (0, 0)), (1.0, 1.0));
     }
 
     #[test]
@@ -353,32 +312,6 @@ mod tests {
         assert!(needs_raise(true, true, true));
         assert!(!needs_raise(true, true, false));
         assert!(!needs_raise(false, false, true));
-    }
-
-    #[test]
-    fn raise_targets_filter_and_order() {
-        let s = |hwnd, topmost, visible, own_thread| Seen { hwnd, topmost, visible, own_thread };
-        let seen = [
-            s(1, true, true, true),
-            s(2, true, true, true),
-            s(3, true, true, true),
-            s(4, true, false, true),
-            s(5, true, true, false),
-            s(6, true, true, true),
-            s(7, false, true, true),
-            s(8, true, true, true),
-        ];
-        // 2 = panel, 3 = under dock, 4 hidden, 5 foreign, 7 ends the walk.
-        assert_eq!(raise_targets(&seen, &[2], &[3]), vec![6, 1]);
-        assert!(raise_targets(&[], &[], &[]).is_empty());
-    }
-
-    #[test]
-    fn dpi_values() {
-        assert_eq!(creation_dpi(1.0), 96);
-        assert_eq!(creation_dpi(1.5), 144);
-        assert_eq!(creation_dpi(f64::NAN), 96);
-        assert_eq!(creation_dpi(-2.0), 96);
     }
 
     #[test]

@@ -21,7 +21,7 @@ fp-petals.workspace = true
 fp-sky.workspace = true
 fp-sources.workspace = true
 fp-world.workspace = true
-fp-win.workspace = true
+fp-platform.workspace = true
 fp-layered.workspace = true
 fp-overlay.workspace = true
 fp-ui.workspace = true
@@ -33,12 +33,28 @@ log.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+fp-win.workspace = true
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Graphics_Imaging",
   "Win32_System_Com",
   "Win32_System_SystemInformation",
 ] }
+
+# Off Windows: our own event loop around eframe (src/looped.rs) and the
+# wallpaper thumbnail decoder (src/decode.rs).
+[target.'cfg(not(windows))'.dependencies]
+winit = { version = "0.30.13", default-features = false }
+image = { workspace = true, features = ["png", "jpeg"] }
+
+# Backend crates are empty libs off their own target.
+[target.'cfg(target_os = "macos")'.dependencies]
+fp-mac.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fp-x11.workspace = true
+fp-wayland.workspace = true
+fp-linux.workspace = true
 
 [lints]
 workspace = true

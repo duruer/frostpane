@@ -21,11 +21,23 @@ fp-characters.workspace = true
 fp-world.workspace = true
 fp-sources.workspace = true
 eframe.workspace = true
-tray-icon.workspace = true
-muda.workspace = true
 log.workspace = true
 # Memory-mapped system font files (already in the tree through eframe).
 memmap2 = "0.9.12"
+
+# Tray: the crates' default (GTK) menus everywhere but Linux; Linux uses the
+# GTK-free StatusNotifierItem host.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = { workspace = true, features = ["libappindicator"] }
+muda = { workspace = true, features = ["gtk3"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tray-icon = { workspace = true, features = ["ksni"] }
+muda = { workspace = true, features = ["snapshot"] }
+wgpu = { workspace = true, features = ["vulkan", "gles"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { workspace = true, features = ["metal"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

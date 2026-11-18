@@ -1,6 +1,6 @@
 [package]
 name = "fp-overlay"
-description = "Frostpane weather overlay: per-monitor click-through windows presented with wgpu (DX12) through DirectComposition."
+description = "Frostpane weather overlay host: per-monitor render threads, behind-windows staging and the wgpu pipelines, over a platform panel backend."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,21 +10,18 @@ publish = false
 [dependencies]
 fp-core.workspace = true
 fp-tracker.workspace = true
+fp-platform.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true
 pollster.workspace = true
 log.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = [
-  "Win32_Foundation",
-  "Win32_Graphics_Gdi",
-  "Win32_Graphics_Dwm",
-  "Win32_Graphics_DirectComposition",
-  "Win32_System_LibraryLoader",
-  "Win32_System_Threading",
-  "Win32_UI_WindowsAndMessaging",
-] }
+# Backends per target; Windows keeps the workspace set (DX12).
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { workspace = true, features = ["metal"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wgpu = { workspace = true, features = ["vulkan", "gles"] }
 
 [lints]
 workspace = true
@@ -36,3 +33,6 @@ fp-rain.workspace = true
 fp-petals.workspace = true
 fp-sky.workspace = true
 tiny-skia.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

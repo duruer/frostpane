@@ -6,6 +6,7 @@
 
 use fp_core::geom::{Frame, PixelRect, Vec2};
 use fp_paint::tiny_skia::Pixmap;
+pub use fp_platform::sprites::stack_ok;
 
 /// Alpha above which a sampled pixel counts as solid (of 255).
 pub const HIT_ALPHA: u8 = 60;
@@ -118,20 +119,6 @@ pub fn pick(
         None => candidates.iter().rposition(|c| c.contains(cursor) && c.solid_at(cursor))?,
     };
     if covered(hit) { None } else { Some(hit) }
-}
-
-/// True when `cands` appear in `run` in the same relative order with
-/// strictly increasing positions (decorations 3.7 step 4).
-pub fn stack_ok<T: PartialEq>(run: &[T], cands: &[T]) -> bool {
-    let mut last: Option<usize> = None;
-    for c in cands {
-        let Some(i) = run.iter().position(|r| r == c) else { return false };
-        if last.is_some_and(|l| i <= l) {
-            return false;
-        }
-        last = Some(i);
-    }
-    true
 }
 
 fn overlap(a: &PixelRect, b: &PixelRect) -> bool {
@@ -402,15 +389,6 @@ mod tests {
         assert!(!covered_by_fullscreen(PixelRect::new(1920, 0, 3840, 1080), &[m]));
         assert!(!covered_by_fullscreen(m, &[]));
         assert!(!covered_by_fullscreen(PixelRect::new(0, 0, 0, 0), &[m]));
-    }
-
-    #[test]
-    fn stack_order() {
-        assert!(stack_ok(&[1, 2, 3, 4], &[2, 4]));
-        assert!(stack_ok::<i32>(&[], &[]));
-        assert!(!stack_ok(&[1, 2, 3], &[3, 2]));
-        assert!(!stack_ok(&[1, 2, 3], &[2, 9]));
-        assert!(!stack_ok(&[1, 2], &[1, 1]));
     }
 
     #[test]

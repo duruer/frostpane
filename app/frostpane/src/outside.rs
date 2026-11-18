@@ -4,13 +4,11 @@
 //! this process closes the card. Presses over our own windows (sprites, the
 //! settings window, the card itself) are consumed and the watch keeps going.
 
+use fp_platform::Platform;
 use fp_tracker::OutsideClick;
 
 /// Poll cadence while a card is open (15 ms).
 pub const EVERY_S: f64 = 0.015;
-/// Virtual-key codes of the physical mouse buttons.
-pub const VK_LBUTTON: u16 = 1;
-pub const VK_RBUTTON: u16 = 2;
 
 #[derive(Debug, Default)]
 pub struct OutsideWatch {
@@ -57,16 +55,14 @@ impl OutsideWatch {
 }
 
 /// Left or right mouse button is down right now.
-#[cfg(windows)]
-pub fn buttons_down() -> bool {
-    fp_win::windows_impl::key_down(VK_LBUTTON) || fp_win::windows_impl::key_down(VK_RBUTTON)
+pub fn buttons_down(p: &dyn Platform) -> bool {
+    p.left_button_down() || p.right_button_down()
 }
 
 /// The pixel belongs to a window of this process; unreadable cursor counts as
 /// own, so that edge is swallowed.
-#[cfg(windows)]
-pub fn over_own(cursor: Option<(i32, i32)>) -> bool {
-    cursor.is_none_or(|(x, y)| fp_win::windows_impl::point_in_own_process(x, y))
+pub fn over_own(p: &dyn Platform, cursor: Option<(i32, i32)>) -> bool {
+    cursor.is_none_or(|at| p.over_own(at))
 }
 
 #[cfg(test)]
@@ -133,10 +129,12 @@ mod tests {
         assert!(!w.step(3.02, true, || true, || false));
     }
 
-    #[cfg(windows)]
     #[test]
     fn unreadable_cursor_counts_as_own() {
-        assert!(over_own(None));
+        let p = fp_platform::null::NullPlatform::new(Default::default());
+        assert!(over_own(&p, None));
+        assert!(!over_own(&p, Some((1, 1))));
+        assert!(!buttons_down(&p));
     }
 
     /// The production chain Core::tick runs: Cards::outside_watch ->

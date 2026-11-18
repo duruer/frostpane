@@ -1,4 +1,4 @@
-//! Win32 backend: one WS_POPUP layered window per sprite.
+//! Win32 sprite backend of `fp-layered`: one WS_POPUP layered window per sprite.
 //!
 //! Window recipe (snowballs 3.7, decorations 3.4): `WS_EX_LAYERED |
 //! WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT`, premultiplied
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 
 use fp_core::geom::PixelRect;
-use fp_paint::tiny_skia::Pixmap;
+use tiny_skia::Pixmap;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, CreateCompatibleDC,
@@ -28,7 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
-use crate::{Backend, Place, WinId};
+use fp_platform::sprites::{Place, SpriteBackend as Backend, WinId};
 
 /// NOSIZE | NOMOVE | NOACTIVATE | NOOWNERZORDER.
 const Z_FLAGS: SET_WINDOW_POS_FLAGS = SET_WINDOW_POS_FLAGS(0x213);
@@ -476,7 +476,7 @@ impl Backend for WinBackend {
             }
             cur = next_above(h);
         }
-        if crate::logic::stack_ok(&run, ids) {
+        if fp_platform::sprites::stack_ok(&run, ids) {
             return;
         }
         for c in cands.iter().rev() {

@@ -19,3 +19,4 @@ fp-decor
 fp-characters
 fp-fight
 fp-world
+fp-platform

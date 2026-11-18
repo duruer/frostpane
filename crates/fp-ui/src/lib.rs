@@ -142,9 +142,15 @@ pub fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
     use eframe::wgpu;
     let mut create = WgpuSetupCreateNew::without_display_handle();
-    if cfg!(windows) {
-        create.instance_descriptor.backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::DX12);
-    }
+    // DX12 on Windows, Metal on macOS, Vulkan with a GL fallback elsewhere.
+    let native = if cfg!(windows) {
+        wgpu::Backends::DX12
+    } else if cfg!(target_os = "macos") {
+        wgpu::Backends::METAL
+    } else {
+        wgpu::Backends::VULKAN | wgpu::Backends::GL
+    };
+    create.instance_descriptor.backends = wgpu::Backends::from_env().unwrap_or(native);
     create.power_preference = wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::LowPower);
     let base = create.device_descriptor.clone();
     create.device_descriptor = std::sync::Arc::new(move |adapter| {

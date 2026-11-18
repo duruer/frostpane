@@ -45,7 +45,11 @@ fn main() {
         scale: 1.0,
         primary: true,
     }]);
-    let mut host = LayeredHost::new();
+    #[cfg(windows)]
+    let backend: Box<dyn fp_layered::Backend> = Box::new(fp_win::sprites::WinBackend::default());
+    #[cfg(not(windows))]
+    let backend: Box<dyn fp_layered::Backend> = Box::new(fp_platform::null::NullSprites::default());
+    let mut host = LayeredHost::new(backend);
     let start = Instant::now();
     let end = start + Duration::from_secs(secs);
     let mut hits = 0u32;

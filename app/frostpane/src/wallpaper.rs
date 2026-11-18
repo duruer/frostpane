@@ -5,9 +5,9 @@
 //! still last applied, by its original file name).
 
 use fp_core::settings::Weathers;
+use fp_platform::Shell;
 use fp_sources::daynight::{self, Action};
 use fp_ui::wallpapers::{self, WallAction};
-use fp_win::Shell;
 use std::path::Path;
 
 pub const KEY_PACK: &str = "dayWallpaper";
@@ -56,7 +56,7 @@ impl Wallpaper {
             return false;
         }
         self.flip = (self.flip + 1) % TAGS.len();
-        match fp_win::stage_wallpaper(dirs.data, &src, TAGS[self.flip]) {
+        match fp_platform::stage_wallpaper(dirs.data, &src, TAGS[self.flip]) {
             Ok(staged) => os.wallpaper_set(&staged),
             Err(e) => {
                 log::warn!("staging wallpaper failed: {e}");
@@ -150,7 +150,7 @@ mod tests {
     use super::*;
     use fp_core::prefs::Prefs;
     use fp_core::settings::Changes;
-    use fp_win::WallpaperScreen;
+    use fp_platform::WallpaperScreen;
     use std::cell::RefCell;
     use std::path::PathBuf;
 
@@ -202,6 +202,10 @@ mod tests {
         fn wallpaper_current(&self) -> Option<PathBuf> {
             self.current.borrow().clone()
         }
+        fn wallpaper_supported(&self) -> bool {
+            true
+        }
+        fn open_folder(&self, _: &std::path::Path) {}
     }
 
     struct Fixture {

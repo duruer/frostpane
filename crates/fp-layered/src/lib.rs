@@ -18,12 +18,11 @@
 //! rounding jitter); a larger difference repaints.
 //!
 //! Layering: the pure decisions live in [`logic`]; everything that touches the
-//! OS sits behind the [`Backend`] trait (Win32 in `windows_impl`), so the diff,
+//! OS sits behind the [`Backend`] trait (`fp_platform::sprites::SpriteBackend`;
+//! Win32 in `fp_win::sprites`), so the diff,
 //! z-order and hit logic is tested with a recording mock.
 
 pub mod logic;
-#[cfg(windows)]
-pub mod windows_impl;
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -34,92 +33,7 @@ use fp_core::scene::{HitMode, Sprite, SpriteKey, ZBand};
 use fp_paint::tiny_skia::Pixmap;
 use logic::{Candidate, Mask, Settle};
 
-/// Opaque OS window handle.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct WinId(pub isize);
-
-/// Where to put a window in the z-order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Place {
-    Topmost,
-    NotTopmost,
-    Top,
-    After(WinId),
-}
-
-/// OS seam of the host. One implementation per platform.
-pub trait Backend {
-    /// New hidden click-through layered window.
-    fn create(&mut self) -> Option<WinId>;
-    fn destroy(&mut self, id: WinId);
-    /// Replace the window's bitmap (premultiplied RGBA in, size = pixmap size).
-    /// False when the bitmap could not be stored (the old one is gone too).
-    fn set_bitmap(&mut self, id: WinId, pm: &Pixmap) -> bool;
-    /// Move to `(x, y)` pixels, apply `alpha` and show if hidden, in one call.
-    fn present(&mut self, id: WinId, x: i32, y: i32, alpha: u8);
-    fn hide(&mut self, id: WinId);
-    /// Toggle `WS_EX_TRANSPARENT`.
-    fn set_click_through(&mut self, id: WinId, on: bool);
-    /// z-order change without move/resize/activation.
-    fn place(&mut self, id: WinId, p: Place);
-    /// Lowest-z taskbar window among the topmost ones.
-    fn lowest_taskbar(&self) -> Option<WinId>;
-    /// A topmost taskbar window sits above `id`.
-    fn taskbar_above(&self, id: WinId) -> bool;
-    /// A foreign top-level window lies above `id` at the cursor.
-    fn covered(&self, id: WinId, cursor: (i32, i32)) -> bool;
-    /// Pixel rect of the foreground window when it is a real foreign app; the
-    /// caller counts only monitors it covers completely as fullscreen.
-    fn fullscreen(&self) -> Vec<PixelRect>;
-    /// Re-apply topmost to those of `ids` found in the topmost band, keeping
-    /// their relative order, so they end above everything else topmost.
-    fn raise_front(&mut self, ids: &[WinId]);
-    /// Order `ids` (back to front) right above the desktop host.
-    fn stack_desktop(&mut self, ids: &[WinId]);
-    /// Dispatch pending messages of this thread.
-    fn pump(&mut self);
-}
-
-/// Backend for platforms without an implementation: windows are bookkeeping only.
-#[derive(Default)]
-pub struct NullBackend {
-    next: isize,
-}
-
-impl Backend for NullBackend {
-    fn create(&mut self) -> Option<WinId> {
-        self.next += 1;
-        Some(WinId(self.next))
-    }
-    fn destroy(&mut self, _: WinId) {}
-    fn set_bitmap(&mut self, _: WinId, _: &Pixmap) -> bool {
-        true
-    }
-    fn present(&mut self, _: WinId, _: i32, _: i32, _: u8) {}
-    fn hide(&mut self, _: WinId) {}
-    fn set_click_through(&mut self, _: WinId, _: bool) {}
-    fn place(&mut self, _: WinId, _: Place) {}
-    fn lowest_taskbar(&self) -> Option<WinId> {
-        None
-    }
-    fn taskbar_above(&self, _: WinId) -> bool {
-        false
-    }
-    fn covered(&self, _: WinId, _: (i32, i32)) -> bool {
-        false
-    }
-    fn fullscreen(&self) -> Vec<PixelRect> {
-        Vec::new()
-    }
-    fn raise_front(&mut self, _: &[WinId]) {}
-    fn stack_desktop(&mut self, _: &[WinId]) {}
-    fn pump(&mut self) {}
-}
-
-#[cfg(windows)]
-type PlatformBackend = windows_impl::WinBackend;
-#[cfg(not(windows))]
-type PlatformBackend = NullBackend;
+pub use fp_platform::sprites::{Place, SpriteBackend as Backend, WinId};
 
 /// How often z-order is re-asserted (desktop-native 3.4 `KeepOnTop`, decorations 3.7 `Stack`).
 const MAINTAIN_EVERY: Duration = Duration::from_secs(1);
@@ -478,20 +392,63 @@ fn apply_settle<B: Backend>(be: &mut B, e: &mut Entry, act: Settle) {
     }
 }
 
-/// Diffing window host.
-pub struct LayeredHost {
-    core: Core<PlatformBackend>,
-}
+/// The injected platform backend behind the generic core.
+struct Injected(Box<dyn Backend>);
 
-impl Default for LayeredHost {
-    fn default() -> Self {
-        Self { core: Core::new(PlatformBackend::default()) }
+impl Backend for Injected {
+    fn create(&mut self) -> Option<WinId> {
+        self.0.create()
+    }
+    fn destroy(&mut self, id: WinId) {
+        self.0.destroy(id);
+    }
+    fn set_bitmap(&mut self, id: WinId, pm: &Pixmap) -> bool {
+        self.0.set_bitmap(id, pm)
+    }
+    fn present(&mut self, id: WinId, x: i32, y: i32, alpha: u8) {
+        self.0.present(id, x, y, alpha);
+    }
+    fn hide(&mut self, id: WinId) {
+        self.0.hide(id);
+    }
+    fn set_click_through(&mut self, id: WinId, on: bool) {
+        self.0.set_click_through(id, on);
+    }
+    fn place(&mut self, id: WinId, p: Place) {
+        self.0.place(id, p);
+    }
+    fn lowest_taskbar(&self) -> Option<WinId> {
+        self.0.lowest_taskbar()
+    }
+    fn taskbar_above(&self, id: WinId) -> bool {
+        self.0.taskbar_above(id)
+    }
+    fn covered(&self, id: WinId, cursor: (i32, i32)) -> bool {
+        self.0.covered(id, cursor)
+    }
+    fn fullscreen(&self) -> Vec<PixelRect> {
+        self.0.fullscreen()
+    }
+    fn raise_front(&mut self, ids: &[WinId]) {
+        self.0.raise_front(ids);
+    }
+    fn stack_desktop(&mut self, ids: &[WinId]) {
+        self.0.stack_desktop(ids);
+    }
+    fn pump(&mut self) {
+        self.0.pump();
     }
 }
 
+/// Diffing window host.
+pub struct LayeredHost {
+    core: Core<Injected>,
+}
+
 impl LayeredHost {
-    pub fn new() -> Self {
-        Self::default()
+    /// A host drawing through `backend` (the platform's sprite windows).
+    pub fn new(backend: Box<dyn Backend>) -> Self {
+        Self { core: Core::new(Injected(backend)) }
     }
 
     /// Apply this frame's sprites. `paint(key, scale)` renders when needed.
@@ -788,7 +745,7 @@ mod tests {
         run(&mut c, &s, t0);
         let ids: Vec<isize> = c.band_ids(ZBand::UnderDock, false).into_iter().map(|i| i.0).collect();
         assert_eq!(ids.len(), 1);
-        assert!(LayeredHost::new().under_dock_ids().is_empty());
+        assert!(LayeredHost::new(Box::new(fp_platform::null::NullSprites::default())).under_dock_ids().is_empty());
     }
 
     #[test]
@@ -818,7 +775,7 @@ mod tests {
 
     #[test]
     fn host_public_api_smoke() {
-        let mut h = LayeredHost::new();
+        let mut h = LayeredHost::new(Box::new(fp_platform::null::NullSprites::default()));
         h.raise_front();
         h.pump_messages();
         assert!(h.is_empty());
@@ -1056,25 +1013,5 @@ mod tests {
         c.clear();
         assert_eq!(log(&mut c).iter().filter(|s| s.starts_with("destroy")).count(), 2);
         assert!(c.entries.is_empty());
-    }
-
-    #[test]
-    fn null_backend_is_inert() {
-        let mut b = NullBackend::default();
-        let id = b.create().unwrap();
-        assert_ne!(b.create().unwrap(), id);
-        b.destroy(id);
-        b.set_bitmap(id, &solid_pm(1, 1));
-        b.present(id, 0, 0, 1);
-        b.hide(id);
-        b.set_click_through(id, true);
-        b.place(id, Place::Top);
-        assert!(b.lowest_taskbar().is_none());
-        assert!(!b.taskbar_above(id));
-        assert!(!b.covered(id, (0, 0)));
-        assert!(b.fullscreen().is_empty());
-        b.raise_front(&[id]);
-        b.stack_desktop(&[id]);
-        b.pump();
     }
 }

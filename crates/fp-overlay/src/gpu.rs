@@ -131,11 +131,16 @@ pub const DESCRIPTORS: u32 = 4096;
 /// descriptor heap. The defaults (`Performance` memory hint, one million
 /// descriptors) commit about 270 MB per device up front; on an integrated GPU
 /// that is ordinary process memory. With these the device costs about 30 MB.
-pub fn device_descriptor() -> wgpu::DeviceDescriptor<'static> {
+/// GL adapters start from the downlevel limits (the full defaults fail there).
+pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
+    let base = match adapter.get_info().backend {
+        wgpu::Backend::Gl => wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
+        _ => wgpu::Limits::default(),
+    };
     wgpu::DeviceDescriptor {
         label: Some("frostpane overlay"),
         memory_hints: wgpu::MemoryHints::MemoryUsage,
-        required_limits: wgpu::Limits { max_non_sampler_bindings: DESCRIPTORS, ..Default::default() },
+        required_limits: wgpu::Limits { max_non_sampler_bindings: DESCRIPTORS, ..base },
         ..Default::default()
     }
 }
@@ -198,7 +203,7 @@ impl Gpu {
     /// A device without a surface (tests, the dump example).
     pub fn headless() -> Result<Self, String> {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        desc.backends = wgpu::Backends::DX12;
+        desc.backends = fp_platform::NATIVE_BACKENDS;
         let instance = wgpu::Instance::new(desc);
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .or_else(|_| {
@@ -208,8 +213,8 @@ impl Gpu {
                 }))
             })
             .map_err(|e| format!("no adapter: {e}"))?;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&device_descriptor())).map_err(|e| format!("no device: {e}"))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
+            .map_err(|e| format!("no device: {e}"))?;
         Ok(Self::new(device, queue))
     }
 
@@ -577,7 +582,8 @@ mod tests {
     const W: u32 = 100;
     const H: u32 = 100;
 
-    /// One shared headless device; `None` (tests skip) on machines without DX12.
+    /// One shared headless device; `None` (tests skip) on machines without a GPU
+    /// for this target's backends.
     fn gpu() -> Option<&'static Gpu> {
         static GPU: OnceLock<Option<Gpu>> = OnceLock::new();
         GPU.get_or_init(|| match Gpu::headless() {

@@ -1,7 +1,8 @@
 //! Frostpane: weather on your desktop.
 //!
 //! Startup order follows core-app 2.1 adapted (see `docs/ARCHITECTURE.md`):
-//! args, DPI awareness, single instance, crash marker, prefs and settings,
+//! args, platform backend (`platform.rs`), DPI awareness, single instance,
+//! crash marker, prefs and settings,
 //! language, then inside the eframe creation callback the tray, world,
 //! sources, day-and-night and (while a weather is shown) the overlay, and
 //! finally the window (hidden for a quiet start). Everything runs on the UI
@@ -21,8 +22,11 @@ mod crash;
 mod decode;
 mod factory;
 mod logger;
+#[cfg(not(windows))]
+mod looped;
 mod outside;
 mod packs;
+mod platform;
 mod react;
 mod sources;
 mod wallpaper;
@@ -32,9 +36,8 @@ use fp_core::effect::Lang;
 use fp_core::prefs::Prefs;
 use fp_core::rng::{Lcg64, mix_seed};
 use fp_core::settings::Settings;
+use fp_platform::{Guard, Instance, Services};
 use fp_ui::eframe::{self, egui};
-use fp_win::Platform;
-use fp_win::windows_impl::{Driver, Instance, SingleInstance, Win};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -49,7 +52,7 @@ const LOGIN_UPTIME_MS: u64 = 300_000;
 /// The eframe app: a thin shell around [`Core`].
 struct Host {
     core: Rc<RefCell<Core>>,
-    driver: Option<Driver>,
+    driver: Option<Guard>,
 }
 
 impl eframe::App for Host {
@@ -77,14 +80,13 @@ impl eframe::App for Host {
     }
 }
 
-fn data_dir() -> PathBuf {
-    std::env::var_os("FROSTPANE_DATA_DIR").map(PathBuf::from).unwrap_or_else(|| Win.data_dir())
+fn data_dir(os: &dyn Services) -> PathBuf {
+    std::env::var_os("FROSTPANE_DATA_DIR").map(PathBuf::from).unwrap_or_else(|| os.data_dir())
 }
 
 /// System uptime below 5 minutes counts as a start at login.
-fn at_login() -> bool {
-    // SAFETY: plain query without arguments.
-    unsafe { windows::Win32::System::SystemInformation::GetTickCount64() < LOGIN_UPTIME_MS }
+fn at_login(os: &dyn Services) -> bool {
+    os.uptime_ms() < LOGIN_UPTIME_MS
 }
 
 fn main() -> eframe::Result {
@@ -92,9 +94,21 @@ fn main() -> eframe::Result {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let demo_cards = argv.iter().any(|a| a == "--open-picker");
     let args = args::parse(argv);
-    fp_win::windows_impl::set_dpi_awareness();
+    let backend = match platform::select() {
+        Ok(b) => b,
+        Err(e) => {
+            log::error!("{e}");
+            eprintln!("frostpane: {e}");
+            std::process::exit(1);
+        }
+    };
+    if backend.limits != fp_platform::Limits::default() {
+        log::info!("platform limits: {:?}", backend.limits);
+    }
+    let os = backend.services.clone();
+    os.init_process();
 
-    let instance = match SingleInstance::acquire(args.quiet) {
+    let instance = match os.single_instance(args.quiet) {
         Instance::First(i) => i,
         Instance::Second => {
             println!("frostpane: already running");
@@ -102,7 +116,7 @@ fn main() -> eframe::Result {
         }
     };
 
-    let dir = data_dir();
+    let dir = data_dir(&*os);
     let mut rng = Lcg64::new(mix_seed(std::process::id().into()));
     let session = fp_core::marker::session_id(&mut rng);
     let launched = std::time::SystemTime::now()
@@ -126,10 +140,10 @@ fn main() -> eframe::Result {
             log::warn!("rewriting settings failed: {e}");
         }
     }
-    let lang = Lang::startup(settings.language.map(|l| l.code()), &Win.os_language());
-    let quiet_start = settings.seen_welcome && (args.quiet || at_login());
+    let lang = Lang::startup(settings.language.map(|l| l.code()), &os.os_language());
+    let quiet_start = settings.seen_welcome && (args.quiet || at_login(&*os));
     let work_height = {
-        let monitors = Win.monitors();
+        let monitors = os.monitors();
         monitors
             .iter()
             .find(|m| m.primary)
@@ -143,44 +157,69 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     let open_request = Arc::new(AtomicBool::new(false));
-    eframe::run_native(
-        "Frostpane",
-        opts,
-        Box::new(move |cc| {
-            let ctx = cc.egui_ctx.clone();
-            fp_ui::install(&ctx);
-            let cfg = Config { args, data_dir: dir, prefs, open_request: open_request.clone(), demo_cards };
-            let core = Rc::new(RefCell::new(Core::new(ctx.clone(), cfg, quiet_start, lang, settings)));
+    // The tick the event loop wrapper runs when the platform has no driver timer.
+    #[cfg(not(windows))]
+    let slot: looped::TickSlot = Rc::default();
+    #[cfg(not(windows))]
+    let fill = slot.clone();
+    let platform::Backend { services, sprites, overlay, ui_x11, .. } = backend;
+    let creator: eframe::AppCreator<'_> = Box::new(move |cc| {
+        let ctx = cc.egui_ctx.clone();
+        fp_ui::install(&ctx);
+        let cfg = Config {
+            args,
+            data_dir: dir,
+            prefs,
+            open_request: open_request.clone(),
+            demo_cards,
+            services: services.clone(),
+            sprites,
+            overlay,
+        };
+        let core = Rc::new(RefCell::new(Core::new(ctx.clone(), cfg, quiet_start, lang, settings)));
+        let tick = || -> Box<dyn FnMut()> {
             let ticker = core.clone();
-            let driver = Driver::new(DRIVER_MS, move || {
+            Box::new(move || {
                 // Skipped while the window loop holds the core.
                 if let Ok(mut c) = ticker.try_borrow_mut() {
                     c.tick();
                 }
-            });
-            if driver.is_none() {
-                log::warn!("driver timer unavailable");
-            }
-            {
-                let flag = open_request;
-                let wake = ctx.clone();
-                instance.listen(move || {
-                    flag.store(true, Ordering::Relaxed);
-                    wake.request_repaint();
-                });
-                // Keep the mutex for the whole process lifetime.
-                std::mem::forget(instance);
-            }
-            {
-                let c = core.borrow();
-                let (panels, _) = c.overlay_stats();
-                println!(
-                    "frostpane: started, {} monitor(s), {panels} overlay panel(s), window {}",
-                    c.monitor_count(),
-                    if quiet_start { "hidden" } else { "shown" }
-                );
-            }
-            Ok(Box::new(Host { core, driver }))
-        }),
-    )
+            })
+        };
+        let driver = services.start(DRIVER_MS, tick());
+        #[cfg(not(windows))]
+        if driver.is_none() {
+            *fill.borrow_mut() = Some(tick());
+        }
+        #[cfg(windows)]
+        if driver.is_none() {
+            log::warn!("driver timer unavailable");
+        }
+        {
+            let flag = open_request;
+            let wake = ctx.clone();
+            instance.listen(Box::new(move || {
+                flag.store(true, Ordering::Relaxed);
+                wake.request_repaint();
+            }));
+            // Keep the mutex for the whole process lifetime.
+            std::mem::forget(instance);
+        }
+        {
+            let c = core.borrow();
+            let (panels, _) = c.overlay_stats();
+            println!(
+                "frostpane: started, {} monitor(s), {panels} overlay panel(s), window {}",
+                c.monitor_count(),
+                if quiet_start { "hidden" } else { "shown" }
+            );
+        }
+        Ok(Box::new(Host { core, driver }))
+    });
+    #[cfg(windows)]
+    let _ = ui_x11;
+    #[cfg(windows)]
+    return eframe::run_native("Frostpane", opts, creator);
+    #[cfg(not(windows))]
+    looped::run("Frostpane", opts, creator, slot, ui_x11)
 }

@@ -1,0 +1,15 @@
+[package]
+name = "fp-linux"
+description = "Frostpane Linux session services shared by the X11 and Wayland backends: data folder, language, time zone, UTC offset (later D-Bus: logind, UPower, portal, autostart, wallpaper)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fp-platform.workspace = true
+libc.workspace = true
+
+[lints]
+workspace = true

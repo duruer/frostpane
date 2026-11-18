@@ -1,0 +1,17 @@
+[package]
+name = "fp-platform"
+description = "Frostpane platform seam: the traits every OS backend implements (platform services, overlay panels, sprite windows), shared types, null backends and the platform-free selection and coordinate logic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+fp-core.workspace = true
+fp-tracker.workspace = true
+wgpu.workspace = true
+tiny-skia.workspace = true
+
+[lints]
+workspace = true

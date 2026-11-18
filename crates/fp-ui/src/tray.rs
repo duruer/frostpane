@@ -25,11 +25,14 @@ static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static QUIT_WAKE: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
 
 /// True for exactly Ctrl+Q (core-app 2.3): `vk` is the key, no Alt, no Shift.
+/// Only the Windows menu hook needs it (NSMenu and SNI hosts handle keys).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn is_quit_chord(vk: u32, ctrl: bool, alt: bool, shift: bool) -> bool {
     vk == u32::from(b'Q') && ctrl && !alt && !shift
 }
 
 /// Record a quit request from the menu loop and wake the UI.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn request_quit() {
     QUIT_REQUESTED.store(true, Ordering::SeqCst);
     if let Ok(g) = QUIT_WAKE.lock()

@@ -11,12 +11,13 @@
 //! The simulations fill [`fp_core::gpu::DrawList`]s; this crate owns all
 //! wgpu pipelines (`gpu`, `shaders/*.wgsl`). `plan` holds the pure logic (DIP
 //! sizing, cursor mapping, the behind-windows staging machine) and is
-//! unit-tested; `win` is the Win32/DirectComposition host.
+//! unit-tested; `host` owns the render threads and the staging over a
+//! platform [`OverlayBackend`] (`fp_win::overlay::WinOverlay` on Windows).
 //!
 //! # Using the host (UI thread only)
 //!
 //! ```ignore
-//! let mut overlay = OverlayHost::new(&monitors)?;          // transparent panels
+//! let mut overlay = OverlayHost::new(WinOverlay::new(), &monitors)?; // transparent panels
 //! overlay.set_effect(Some(Arc::new(|p: &PanelInfo| make_fall(kind, p))));
 //! overlay.set_share(0.5);                                  // battery saver x storm
 //! overlay.set_wind(Wind::GentleLeft);
@@ -30,16 +31,13 @@
 //! ```
 //!
 //! Staged transitions (behind-windows hand-over, parked panels) advance on a
-//! thread timer of the UI thread, so the host needs the UI message loop to
-//! run (winit's loop does). `OverlayHost::tick` runs them by hand.
+//! thread timer of the UI thread when the backend has one, so the host needs
+//! the UI message loop to run (winit's loop does). Without one
+//! ([`OverlayHost::needs_tick`]) the owner calls `OverlayHost::tick`.
 
 pub mod gpu;
+mod host;
 pub mod plan;
-#[cfg(not(windows))]
-#[path = "stub.rs"]
-mod win;
-#[cfg(windows)]
-mod win;
 
 pub use gpu::{Gpu, Image};
 pub use plan::PanelInfo;
@@ -48,6 +46,7 @@ use fp_core::desktop::MonitorInfo;
 use fp_core::falling::Falling;
 use fp_core::surface::ScreenSnap;
 use fp_core::wind::Wind;
+use fp_platform::overlay::OverlayBackend;
 use std::sync::Arc;
 
 /// Builds the simulation of one panel (called on the UI thread, again for
@@ -74,17 +73,96 @@ impl Default for Config {
     }
 }
 
+/// The host's API with the backend type erased.
+trait HostOps {
+    fn config(&self) -> Config;
+    fn panels(&self) -> usize;
+    fn frames(&self) -> u64;
+    fn infos(&self) -> Vec<PanelInfo>;
+    fn set_effect(&self, factory: Option<EffectFactory>);
+    fn set_share(&self, share: f64);
+    fn set_wind(&self, wind: Wind);
+    fn set_lightning(&self, on: bool);
+    fn set_keep_clear(&self, on: bool);
+    fn set_behind_windows(&self, on: bool);
+    fn update(&self, screens: &[ScreenSnap], interval: f64, to_other_space: bool);
+    fn keep_on_top(&self);
+    fn set_under_dock(&self, ids: Vec<isize>);
+    fn tick(&self);
+    fn needs_tick(&self) -> bool;
+}
+
+impl<B: OverlayBackend> HostOps for host::Host<B> {
+    fn config(&self) -> Config {
+        host::Host::config(self)
+    }
+    fn panels(&self) -> usize {
+        host::Host::panels(self)
+    }
+    fn frames(&self) -> u64 {
+        host::Host::frames(self)
+    }
+    fn infos(&self) -> Vec<PanelInfo> {
+        host::Host::infos(self)
+    }
+    fn set_effect(&self, factory: Option<EffectFactory>) {
+        host::Host::set_effect(self, factory);
+    }
+    fn set_share(&self, share: f64) {
+        host::Host::set_share(self, share);
+    }
+    fn set_wind(&self, wind: Wind) {
+        host::Host::set_wind(self, wind);
+    }
+    fn set_lightning(&self, on: bool) {
+        host::Host::set_lightning(self, on);
+    }
+    fn set_keep_clear(&self, on: bool) {
+        host::Host::set_keep_clear(self, on);
+    }
+    fn set_behind_windows(&self, on: bool) {
+        host::Host::set_behind_windows(self, on);
+    }
+    fn update(&self, screens: &[ScreenSnap], interval: f64, to_other_space: bool) {
+        host::Host::update(self, screens, interval, to_other_space);
+    }
+    fn keep_on_top(&self) {
+        host::Host::keep_on_top(self);
+    }
+    fn set_under_dock(&self, ids: Vec<isize>) {
+        host::Host::set_under_dock(self, ids);
+    }
+    fn tick(&self) {
+        host::Host::tick(self);
+    }
+    fn needs_tick(&self) -> bool {
+        host::Host::needs_tick(self)
+    }
+}
+
+type MakeHost = Box<dyn Fn(&[MonitorInfo], Config) -> Result<Box<dyn HostOps>, String>>;
+
 /// Handle to all overlay panels. Create and drop on the UI thread.
 pub struct OverlayHost {
-    inner: Option<win::Host>,
+    make: MakeHost,
+    /// The backend's "a panel's scale changed" flag; read even after a
+    /// failed rebuild left no panels.
+    rescaled: Box<dyn Fn() -> bool>,
+    inner: Option<Box<dyn HostOps>>,
 }
 
 impl OverlayHost {
     /// Creates one click-through panel per monitor and starts the render
     /// threads. Monitors that fail are skipped; an error means no GPU.
     /// Without an effect the panels stay transparent and idle.
-    pub fn new(monitors: &[MonitorInfo]) -> Result<Self, String> {
-        Ok(Self { inner: Some(win::Host::new(monitors, Config::default())?) })
+    pub fn new<B: OverlayBackend>(backend: B, monitors: &[MonitorInfo]) -> Result<Self, String> {
+        let flag = backend.clone();
+        let rescaled = Box::new(move || flag.take_rescaled());
+        let make: MakeHost = Box::new(move |m: &[MonitorInfo], cfg: Config| {
+            host::Host::new(backend.clone(), m, cfg).map(|h| Box::new(h) as Box<dyn HostOps>)
+        });
+        let inner = make(monitors, Config::default())?;
+        Ok(Self { make, rescaled, inner: Some(inner) })
     }
 
     /// Tears every panel down and builds new ones for `monitors` (display or
@@ -92,26 +170,26 @@ impl OverlayHost {
     /// keep-clear and behind-windows settings carry over. On error the host
     /// has no panels until the next successful rebuild.
     pub fn rebuild(&mut self, monitors: &[MonitorInfo]) -> Result<(), String> {
-        let cfg = self.inner.as_ref().map(win::Host::config).unwrap_or_default();
+        let cfg = self.inner.as_ref().map(|h| h.config()).unwrap_or_default();
         // Full teardown first: two overlays never coexist.
         self.inner = None;
-        self.inner = Some(win::Host::new(monitors, cfg)?);
+        self.inner = Some((self.make)(monitors, cfg)?);
         Ok(())
     }
 
     /// Number of live panels.
     pub fn panels(&self) -> usize {
-        self.inner.as_ref().map_or(0, win::Host::panels)
+        self.inner.as_ref().map_or(0, |h| h.panels())
     }
 
     /// Frames presented so far on the main panels, summed.
     pub fn frames(&self) -> u64 {
-        self.inner.as_ref().map_or(0, win::Host::frames)
+        self.inner.as_ref().map_or(0, |h| h.frames())
     }
 
     /// The screens the panels were built for, in panel order.
     pub fn infos(&self) -> Vec<PanelInfo> {
-        self.inner.as_ref().map(win::Host::infos).unwrap_or_default()
+        self.inner.as_ref().map(|h| h.infos()).unwrap_or_default()
     }
 
     /// Sets (or removes with `None`) the weather. Every panel gets a fresh
@@ -186,7 +264,7 @@ impl OverlayHost {
     /// True once after a panel's DPI changed (`WM_DPICHANGED`): call
     /// [`OverlayHost::rebuild`].
     pub fn rescaled(&self) -> bool {
-        win::take_rescaled()
+        (self.rescaled)()
     }
 
     /// Runs staged steps that are due. Normally driven by an internal timer.
@@ -194,5 +272,11 @@ impl OverlayHost {
         if let Some(h) = &self.inner {
             h.tick();
         }
+    }
+
+    /// The backend has no UI-thread timer: call [`OverlayHost::tick`] from
+    /// the app's own tick (never on Windows).
+    pub fn needs_tick(&self) -> bool {
+        self.inner.as_ref().is_some_and(|h| h.needs_tick())
     }
 }

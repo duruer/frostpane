@@ -58,32 +58,32 @@ unsafe impl Sync for SingleInstance {}
 const MUTEX: PCWSTR = w!("Local\\FrostpaneRunning");
 const EVENT: PCWSTR = w!("Local\\FrostpaneOpenWindow");
 
-pub enum Instance {
+pub enum Acquired {
     First(SingleInstance),
     /// Another instance runs; it was asked to open its window unless quiet.
     Second,
 }
 
 impl SingleInstance {
-    pub fn acquire(quiet: bool) -> Instance {
+    pub fn acquire(quiet: bool) -> Acquired {
         Self::acquire_named(MUTEX, EVENT, quiet)
     }
 
-    fn acquire_named(mutex_name: PCWSTR, event_name: PCWSTR, quiet: bool) -> Instance {
+    fn acquire_named(mutex_name: PCWSTR, event_name: PCWSTR, quiet: bool) -> Acquired {
         // SAFETY: Win32 handle APIs with valid arguments; handles closed on drop.
         unsafe {
-            let Ok(mutex) = CreateMutexW(None, true, mutex_name) else { return Instance::Second };
+            let Ok(mutex) = CreateMutexW(None, true, mutex_name) else { return Acquired::Second };
             let first = GetLastError() != ERROR_ALREADY_EXISTS;
             let event = CreateEventW(None, false, false, event_name).unwrap_or_default();
             if first {
-                Instance::First(SingleInstance { mutex, event })
+                Acquired::First(SingleInstance { mutex, event })
             } else {
                 if !quiet && !event.is_invalid() {
                     let _ = SetEvent(event);
                 }
                 let _ = CloseHandle(event);
                 let _ = CloseHandle(mutex);
-                Instance::Second
+                Acquired::Second
             }
         }
     }
@@ -119,7 +119,14 @@ impl Drop for SingleInstance {
     }
 }
 
-/// The Windows implementation of [`Platform`] and [`Shell`].
+impl fp_platform::InstanceGuard for SingleInstance {
+    fn listen(&self, on_open: Box<dyn Fn() + Send>) {
+        SingleInstance::listen(self, on_open);
+    }
+}
+
+/// The Windows implementation of [`Platform`], [`Shell`],
+/// [`fp_platform::SystemEvents`] and [`fp_platform::Driver`].
 #[derive(Default)]
 pub struct Win;
 
@@ -178,6 +185,56 @@ impl Platform for Win {
     fn window_corner(&self) -> f64 {
         shell::window_corner()
     }
+
+    fn init_process(&self) {
+        set_dpi_awareness();
+    }
+
+    fn utc_offset_s(&self) -> i32 {
+        utc_offset_s()
+    }
+
+    fn uptime_ms(&self) -> u64 {
+        // SAFETY: plain query without arguments.
+        unsafe { windows::Win32::System::SystemInformation::GetTickCount64() }
+    }
+
+    fn has_geometry(&self) -> bool {
+        true
+    }
+
+    fn over_own(&self, at: (i32, i32)) -> bool {
+        point_in_own_process(at.0, at.1)
+    }
+
+    fn hooks(&self, tx: std::sync::mpsc::Sender<fp_tracker::HookEvent>) -> Option<fp_platform::Guard> {
+        // A set without any hook is dropped at once (the tracker then only polls).
+        let hooks = HookSet::install(tx);
+        (hooks.count() > 0).then(|| Box::new(hooks) as fp_platform::Guard)
+    }
+
+    fn shelves_reader(&self) -> Box<dyn FnOnce() -> Vec<PixelRect> + Send> {
+        Box::new(desk::taskbar_shelves)
+    }
+
+    fn single_instance(&self, quiet: bool) -> Instance {
+        match SingleInstance::acquire(quiet) {
+            Acquired::First(i) => Instance::First(Box::new(i)),
+            Acquired::Second => Instance::Second,
+        }
+    }
+}
+
+impl fp_platform::SystemEvents for Win {
+    fn watch(&self, on: Box<dyn FnMut(SystemEvent, Option<bool>)>) -> Option<fp_platform::Guard> {
+        SystemWatcher::new(on).map(|w| Box::new(w) as fp_platform::Guard)
+    }
+}
+
+impl fp_platform::Driver for Win {
+    fn start(&self, every_ms: u32, tick: Box<dyn FnMut()>) -> Option<fp_platform::Guard> {
+        Driver::new(every_ms, tick).map(|d| Box::new(d) as fp_platform::Guard)
+    }
 }
 
 impl Shell for Win {
@@ -220,6 +277,12 @@ impl Shell for Win {
     fn wallpaper_current(&self) -> Option<PathBuf> {
         shell::wallpaper_current()
     }
+    fn wallpaper_supported(&self) -> bool {
+        true
+    }
+    fn open_folder(&self, dir: &Path) {
+        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+    }
 }
 
 #[cfg(test)]
@@ -231,15 +294,15 @@ mod tests {
         let m = w!("Local\\FrostpaneTestMutex");
         let e = w!("Local\\FrostpaneTestEvent");
         let first = SingleInstance::acquire_named(m, e, false);
-        let Instance::First(f) = first else { panic!("expected first") };
+        let Acquired::First(f) = first else { panic!("expected first") };
         let (tx, rx) = std::sync::mpsc::channel();
         f.listen(move || {
             let _ = tx.send(());
         });
-        assert!(matches!(SingleInstance::acquire_named(m, e, true), Instance::Second));
+        assert!(matches!(SingleInstance::acquire_named(m, e, true), Acquired::Second));
         assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err());
         // The mutex is already owned by this process, so a re-acquire is still "second".
-        assert!(matches!(SingleInstance::acquire_named(m, e, false), Instance::Second));
+        assert!(matches!(SingleInstance::acquire_named(m, e, false), Acquired::Second));
         assert!(rx.recv_timeout(std::time::Duration::from_secs(2)).is_ok());
     }
 
