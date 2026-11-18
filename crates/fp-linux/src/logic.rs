@@ -849,13 +849,13 @@ mod tests {
         assert!(!wallpaper_supported(Desktop::Gnome, only("feh"), false));
         assert!(wallpaper_supported(Desktop::Cinnamon, only("gsettings"), false));
         assert!(wallpaper_supported(Desktop::Mate, only("gsettings"), false));
-        assert!(wallpaper_supported(Desktop::Kde, |_| false, true));
-        assert!(!wallpaper_supported(Desktop::Kde, |_| true, false));
+        assert!(wallpaper_supported(Desktop::Kde, only(""), true));
+        assert!(!wallpaper_supported(Desktop::Kde, only("gsettings"), false));
         assert!(wallpaper_supported(Desktop::Xfce, only("xfconf-query"), false));
         assert!(wallpaper_supported(Desktop::Sway, only("swaymsg"), false));
         assert!(wallpaper_supported(Desktop::Hyprland, only("hyprctl"), false));
         assert!(wallpaper_supported(Desktop::Other, only("feh"), false));
-        assert!(!wallpaper_supported(Desktop::Other, |_| false, true));
+        assert!(!wallpaper_supported(Desktop::Other, only(""), true));
     }
 
     fn props(iface: &str, k: &str, v: Val) -> Signal {
@@ -908,6 +908,8 @@ mod tests {
             value: Val::Bool(false),
         };
         assert_eq!(react(&motion), (vec![], vec![Change::ReducedMotion(true)]));
+        let other = Signal::Portal { ns: "x".into(), key: "y".into(), value: Val::Bool(true) };
+        assert_eq!(react(&other), (vec![], vec![]));
         assert!(scheme_is_light(2));
         assert!(!scheme_is_light(1) && !scheme_is_light(0));
     }

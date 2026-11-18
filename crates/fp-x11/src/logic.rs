@@ -585,7 +585,8 @@ mod tests {
     fn states_desktops_opacity() {
         let s = WmState::from_names(["_NET_WM_STATE_HIDDEN", "_NET_WM_STATE_ABOVE", "X"]);
         assert!(s.hidden && s.above && !s.fullscreen);
-        assert!(WmState::from_names(["_NET_WM_STATE_FULLSCREEN"]).fullscreen);
+        // Same array type as above: one instantiation keeps line coverage whole.
+        assert!(WmState::from_names(["X", "Y", "_NET_WM_STATE_FULLSCREEN"]).fullscreen);
         assert!(cloaked(Some(1), Some(0)));
         assert!(!cloaked(Some(ALL_DESKTOPS), Some(0)));
         assert!(!cloaked(Some(0), Some(0)));
@@ -700,6 +701,7 @@ mod tests {
         assert_eq!(xft_dpi("Xft.antialias:\t1\nXft.dpi:\t144\n"), Some(144.0));
         assert_eq!(xft_dpi("Xft.dpi: nope"), None);
         assert_eq!(xft_dpi("Xft.dpi: -3"), None);
+        assert_eq!(xft_dpi("! comment without a colon\nXft.dpi: 192"), Some(192.0));
         assert_eq!(xft_dpi("Xcursor.size: 24"), None);
         // 1920x1080 on a 527x296 mm panel (~96 dpi) -> 1.
         assert_eq!(randr_scale((1920, 1080), (527, 296)), 1.0);
@@ -720,9 +722,11 @@ mod tests {
         let stack = [1, 2, 3, 4, 5];
         assert!(is_above(&stack, 4, 2));
         assert!(!is_above(&stack, 2, 4) && !is_above(&stack, 9, 1));
-        assert!(needs_front(&stack, 3, |w| w == 5));
-        assert!(!needs_front(&stack, 3, |w| w >= 4));
-        assert!(needs_front(&stack, 9, |_| true));
+        // One closure type for every call (one instantiation).
+        let ours = |set: &'static [u32]| move |w: u32| set.contains(&w);
+        assert!(needs_front(&stack, 3, ours(&[1, 2, 3, 4])));
+        assert!(!needs_front(&stack, 3, ours(&[4, 5])));
+        assert!(needs_front(&stack, 9, ours(&[])));
         assert!(desktop_run_ok(&stack, Some(1), &[2, 3]));
         assert!(!desktop_run_ok(&stack, Some(1), &[3, 2]));
         assert!(desktop_run_ok(&stack, None, &[1]));
@@ -740,6 +744,9 @@ mod tests {
         let ok = [1, 4, 5, 3, 2, 6];
         assert_eq!(raise_plan(&ok, &[4, 5], &[], &[2, 6], &[3]), RaisePlan::default());
         assert_eq!(raise_plan(&ok, &[], &[], &[2], &[3]), RaisePlan::default());
+        // No card: only the sprites below the top panel are raised.
+        let p = raise_plan(&stack, &[4, 5], &[], &[2], &[]);
+        assert_eq!(p, RaisePlan { lower: vec![], below: None, raise: vec![2] });
     }
 
     #[test]

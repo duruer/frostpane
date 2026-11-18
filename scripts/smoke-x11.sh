@@ -1,65 +1,53 @@
 #!/usr/bin/env bash
-# X11 smoke: Xvfb + a window manager (openbox, else any of the fallbacks),
-# then scripts/smoke-run.sh. Optionally takes a screenshot (xwd -> png when
-# available) into $SMOKE_SHOT_DIR.
+# X11 smoke (porting design 5.3), as CI runs it. Wraps the X11 backend's own
+# end-to-end check, crates/fp-x11/smoke/smoke.sh (private Xvfb + openbox +
+# picom + an xterm; asserts panels, frames and a snow ledge on the xterm),
+# in three sessions: normal, behind-windows (overlay stacked under the
+# xterm) and without a compositor (no panel, clean exit). Then runs the
+# live backend test, crates/fp-x11/smoke/live.sh.
 #
 # Usage: smoke-x11.sh [-s SECONDS] [-b BINARY]
-# Env: SMOKE_REQUIRE_FRAMES=1 (see smoke-run.sh), SMOKE_WM=openbox,
-#      SMOKE_SHOT_DIR=dir, SMOKE_COMPOSITOR=picom (start a compositor too).
+# Env:   SMOKE_SHOT_DIR=dir keeps every run's screenshots and logs there.
+#        SMOKE_SKIP_LIVE=1 skips the live test (it runs cargo).
+# Needs: Xvfb openbox picom xterm xdotool x11-utils imagemagick dbus
+#        mesa-vulkan-drivers (see smoke.sh).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-secs=8
-args=()
+root="$(cd "$here/.." && pwd)"
+target="${CARGO_TARGET_DIR:-$root/target}"
+secs=20
+bin=""
 while getopts "s:b:" o; do
   case "$o" in
-    s) secs="$OPTARG"; args+=(-s "$OPTARG") ;;
-    b) args+=(-b "$OPTARG") ;;
+    s) secs="$OPTARG" ;;
+    b) bin="$OPTARG" ;;
     *) echo "usage: $0 [-s seconds] [-b binary]" >&2; exit 2 ;;
   esac
 done
+bin="${bin:-$target/debug/frostpane}"
+[ -x "$bin" ] || { echo "smoke-x11: no frostpane binary at $bin (pass -b)" >&2; exit 2; }
 
-command -v Xvfb >/dev/null || { echo "smoke-x11: Xvfb missing (apt install xvfb)" >&2; exit 2; }
-
-pids=()
-cleanup() { for p in "${pids[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done; }
-trap cleanup EXIT
-
-disp=":$((90 + $$ % 50))"
-Xvfb "$disp" -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
-pids+=($!)
-export DISPLAY="$disp"
-for _ in $(seq 1 50); do
-  if command -v xdpyinfo >/dev/null; then xdpyinfo >/dev/null 2>&1 && break
-  else [ -e "/tmp/.X11-unix/X${disp#:}" ] && break; fi
-  sleep 0.1
-done
-
-# Pin the backend; a runner may have stray Wayland variables.
-unset WAYLAND_DISPLAY SWAYSOCK HYPRLAND_INSTANCE_SIGNATURE
-export FROSTPANE_BACKEND=x11
-export XDG_SESSION_TYPE=x11
-
-wm="${SMOKE_WM:-openbox}"
-if command -v "$wm" >/dev/null; then
-  "$wm" >/dev/null 2>&1 &
-  pids+=($!)
-else
-  echo "smoke-x11: window manager '$wm' not found, running without"
-fi
-if [ -n "${SMOKE_COMPOSITOR:-}" ] && command -v "$SMOKE_COMPOSITOR" >/dev/null; then
-  "$SMOKE_COMPOSITOR" >/dev/null 2>&1 &
-  pids+=($!)
-fi
-sleep 1
-
-if [ -n "${SMOKE_SHOT_DIR:-}" ]; then
-  mkdir -p "$SMOKE_SHOT_DIR"
-  if command -v import >/dev/null; then
-    export SMOKE_POST="import -window root '$SMOKE_SHOT_DIR/x11.png'"
-  elif command -v xwd >/dev/null; then
-    export SMOKE_POST="xwd -root -silent -out '$SMOKE_SHOT_DIR/x11.xwd'"
+out="${SMOKE_SHOT_DIR:-$(mktemp -d)}"
+mkdir -p "$out"
+# The screenshot is taken a few seconds before the run ends.
+shot_at=$((secs > 8 ? secs - 6 : secs / 2))
+fail=0
+run() { # name, extra env...
+  local name="$1"; shift
+  echo "== smoke-x11: $name"
+  if ! env SMOKE_OUT="$out/x11-$name" SHOT_AT="$shot_at" "$@" "$root/crates/fp-x11/smoke/smoke.sh" "$bin" "$secs"; then
+    echo "smoke-x11: $name FAILED" >&2
+    fail=1
   fi
-fi
+}
+run normal
+run behind SMOKE_BEHIND=1
+run no-compositor SMOKE_NO_COMPOSITOR=1
 
-exec "$here/smoke-run.sh" "${args[@]}"
+if [ "${SMOKE_SKIP_LIVE:-0}" != 1 ]; then
+  echo "== smoke-x11: live backend test"
+  (cd "$root" && crates/fp-x11/smoke/live.sh) || { echo "smoke-x11: live test FAILED" >&2; fail=1; }
+fi
+echo "smoke-x11: artifacts in $out"
+exit "$fail"

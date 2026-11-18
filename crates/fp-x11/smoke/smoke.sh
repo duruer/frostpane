@@ -7,11 +7,15 @@
 #   1. the exit line reports >= 1 overlay panel and > 0 frames presented;
 #   2. a band just above the xterm's frame (the ledge) holds clearly more
 #      snow pixels than the same band in open air and than before the run;
-#   3. with SMOKE_BEHIND=1: an overlay panel is stacked below the xterm frame.
+#   3. with SMOKE_BEHIND=1: an overlay panel is stacked below the xterm frame;
+#   4. with SMOKE_XFT_DPI=192 (a scaled session): snow falls over the whole
+#      screen, not only in the top-left quarter (the swap chain is sized to
+#      the panel's pixels, X cannot stretch it).
 #
 # Usage: crates/fp-x11/smoke/smoke.sh [path/to/frostpane] [seconds]
 # Env:   SMOKE_BEHIND=1, SMOKE_OUT=dir, SMOKE_DISPLAY=:97, SHOT_AT=14,
-#        SMOKE_NO_COMPOSITOR=1 (expects no panel, still exits cleanly).
+#        SMOKE_NO_COMPOSITOR=1 (expects no panel, still exits cleanly),
+#        SMOKE_XFT_DPI=192 (sets Xft.dpi in RESOURCE_MANAGER).
 # Needs: Xvfb openbox picom xterm xdotool x11-utils imagemagick dbus
 #        mesa-vulkan-drivers (lavapipe). Kills only the PIDs it started.
 set -u
@@ -23,12 +27,13 @@ DPY=${SMOKE_DISPLAY:-:97}
 OUT=${SMOKE_OUT:-$(mktemp -d)}
 mkdir -p "$OUT"
 
-for t in Xvfb openbox picom xterm xdotool xwininfo import convert dbus-run-session; do
+for t in Xvfb openbox picom xterm xdotool xwininfo xprop import convert dbus-run-session; do
     command -v "$t" >/dev/null || { echo "smoke: missing $t"; exit 2; }
 done
 [ -x "$BIN" ] || { echo "smoke: no binary at $BIN"; exit 2; }
 
 PIDS=()
+# shellcheck disable=SC2329 # called by the EXIT trap
 cleanup() {
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done
     wait 2>/dev/null
@@ -55,7 +60,7 @@ for s in xdg-open gsettings feh; do
     chmod +x "$OUT/shim/$s"
 done
 export PATH=$OUT/shim:$PATH
-LVP=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)
+LVP=$(find /usr/share/vulkan/icd.d -name "lvp_icd*.json" 2>/dev/null | head -1)
 [ -n "$LVP" ] && export VK_ICD_FILENAMES=$LVP
 
 # Abstract socket only: /tmp/.X11-unix may be read-only (WSLg).
@@ -76,6 +81,12 @@ XT=$(xdotool search --name smoke-xterm | head -1)
 [ -n "$XT" ] || { echo "smoke: xterm did not appear"; exit 1; }
 geo() { xwininfo -frame -id "$XT" | awk -v k="$1" '$0 ~ k {print $NF}'; }
 FX=$(geo "Absolute upper-left X"); FY=$(geo "Absolute upper-left Y"); FW=$(geo "Width")
+# xwininfo reports the client; the WM frame (title bar) sits around it.
+EXT=$(xprop -id "$XT" _NET_FRAME_EXTENTS 2>/dev/null | sed -n 's/.*= *//p')
+if [ -n "$EXT" ]; then
+    IFS=', ' read -r EL ER ET _ <<< "$EXT"
+    FX=$((FX - EL)); FY=$((FY - ET)); FW=$((FW + EL + ER))
+fi
 echo "smoke: xterm frame at $FX,$FY width $FW"
 # Band just above the frame, inset from the corners.
 BAND_H=10
@@ -87,9 +98,13 @@ bright() { # file [band top]
 import -window root "$OUT/before.png"
 BEFORE=$(bright "$OUT/before.png")
 
+# Only the app sees the scale: set after the WM and the xterm are up.
+if [ -n "${SMOKE_XFT_DPI:-}" ]; then
+    xprop -root -f RESOURCE_MANAGER 8s -set RESOURCE_MANAGER "$(printf 'Xft.dpi:\t%s\n' "$SMOKE_XFT_DPI")"
+fi
 dbus-run-session -- "$BIN" --quiet --seconds "$SECS" >"$OUT/app.out" 2>"$OUT/app.err" &
 APP=$!
-PIDS+=($APP)
+PIDS+=("$APP")
 sleep "$SHOT_AT"
 import -window root "$OUT/shot.png"
 # Root children while the app runs (xwininfo lists them top to bottom).
@@ -113,6 +128,14 @@ else
     [ "${PANELS:-0}" -ge 1 ] || { echo "smoke: FAIL no overlay panel"; ok=1; }
     [ "${FRAMES:-0}" -gt 0 ] || { echo "smoke: FAIL no frames"; ok=1; }
     [ "$AFTER" -gt "$((BEFORE + 2 * AIR + 50))" ] || { echo "smoke: FAIL no snow on the xterm ledge"; ok=1; }
+fi
+if [ -n "${SMOKE_XFT_DPI:-}" ] && [ "${SMOKE_NO_COMPOSITOR:-0}" != 1 ]; then
+    quad() { convert "$OUT/shot.png" -crop "$1" +repage -colorspace gray -threshold 60% -format '%[fx:round(mean*w*h)]' info:; }
+    # Top-left vs top-right strip, both clear of the xterm; an unscaled
+    # swap chain covers only x < 960, y < 540.
+    TL=$(quad 400x340+40+20); TR=$(quad 400x340+1480+20)
+    echo "smoke: scaled session: flake pixels top-left=$TL top-right=$TR"
+    [ "$TR" -gt 30 ] && [ "$TR" -gt "$((TL / 4))" ] || { echo "smoke: FAIL overlay does not fill the screen"; ok=1; }
 fi
 if [ "$BEHIND" = true ]; then
     # Top-level children have 5 spaces of indent; count from the top. The

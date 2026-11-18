@@ -7,6 +7,8 @@
 # Usage: smoke-wayland.sh [path/to/frostpane] [seconds]
 # Needs: sway, swaymsg, foot, grim, python3, dbus-run-session, a Vulkan
 # driver (lavapipe from mesa-vulkan-drivers is used when present).
+# Env: BEHIND=1 (behind-windows mode), FULLSCREEN=1, KEEP=1 (keep the temp
+# dir), SMOKE_OUT=dir (copy screenshots and logs there), PROBE/SPRITES.
 # Exit status 0 = pass. Only processes this script started are stopped.
 set -euo pipefail
 
@@ -32,6 +34,10 @@ pids=()
 cleanup() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
     wait 2>/dev/null || true
+    if [ -n "${SMOKE_OUT:-}" ]; then
+        mkdir -p "$SMOKE_OUT"
+        cp "$tmp"/*.ppm "$tmp"/*.txt "$tmp"/*.log "$SMOKE_OUT"/ 2>/dev/null || true
+    fi
     [ -n "${KEEP:-}" ] || rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -53,7 +59,7 @@ for t in xdg-open gsettings feh; do
     chmod +x "$tmp/bin/$t"
 done
 export PATH="$tmp/bin:$PATH"
-lvp="$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -n1 || true)"
+lvp="$(find /usr/share/vulkan/icd.d -name "lvp_icd.*.json" 2>/dev/null | head -n1 || true)"
 [ -n "$lvp" ] && export VK_ICD_FILENAMES="$lvp"
 
 cat > "$tmp/sway.conf" <<'CONF'
@@ -72,8 +78,8 @@ WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
     sway -c "$tmp/sway.conf" >"$tmp/sway.log" 2>&1 &
 pids+=($!)
 for _ in $(seq 50); do
-    sock="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -n1 || true)"
-    disp="$(cd "$XDG_RUNTIME_DIR" && ls wayland-* 2>/dev/null | grep -v lock | head -n1 || true)"
+    sock="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name "sway-ipc.*.sock" 2>/dev/null | head -n1 || true)"
+    disp="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name "wayland-*" ! -name "*.lock" -printf "%f\n" 2>/dev/null | head -n1 || true)"
     [ -n "$sock" ] && [ -n "$disp" ] && break
     sleep 0.2
 done

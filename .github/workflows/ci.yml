@@ -104,8 +104,9 @@ jobs:
           key: unix-${{ matrix.os }}
 
       # libssl-dev + pkg-config: native-tls. fonts-noto-cjk: font tests.
-      # mesa-vulkan-drivers: lavapipe for the headless GPU tests.
-      # xvfb, openbox, x11-utils, imagemagick: the X11 smoke run.
+      # mesa-vulkan-drivers: lavapipe for the headless GPU tests and smokes.
+      # xvfb, openbox, picom, xterm, xdotool, x11-utils, imagemagick: the
+      # X11 smoke. sway, foot, grim: the Wayland smoke. dbus: both.
       - name: Install Linux packages
         if: runner.os == 'Linux'
         run: |
@@ -114,7 +115,8 @@ jobs:
             pkg-config libssl-dev fonts-noto-cjk \
             libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri \
             libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb1-dev libx11-dev \
-            xvfb openbox x11-utils imagemagick
+            xvfb openbox picom xterm xdotool x11-utils imagemagick \
+            sway foot grim dbus python3
 
       - name: Format
         if: matrix.os == 'ubuntu-latest'
@@ -129,13 +131,27 @@ jobs:
       - name: Build app
         run: cargo build -p frostpane
 
-      # While a backend is still the Null one this asserts a clean exit only;
-      # export SMOKE_REQUIRE_FRAMES=1 to demand presented frames.
+      # macOS-only tests of fp-mac (CGWindowList bounds, single-instance
+      # socket) already ran in the workspace test; listed here so a skip shows.
+      - name: Test fp-mac
+        if: runner.os == 'macOS'
+        run: cargo test -p fp-mac -- --nocapture
+
+      # The real backends must present frames and put snow on a foreign
+      # window (screenshots are uploaded below).
       - name: Smoke (X11)
         if: runner.os == 'Linux'
         env:
+          SMOKE_REQUIRE_FRAMES: "1"
           SMOKE_SHOT_DIR: ${{ runner.temp }}/shots
-        run: scripts/smoke-x11.sh -s 8
+        run: scripts/smoke-x11.sh -s 20
+
+      - name: Smoke (Wayland)
+        if: runner.os == 'Linux'
+        env:
+          SMOKE_REQUIRE_FRAMES: "1"
+          SMOKE_SHOT_DIR: ${{ runner.temp }}/shots
+        run: scripts/smoke-wayland.sh -s 25
 
       - name: Smoke (macOS)
         if: runner.os == 'macOS'

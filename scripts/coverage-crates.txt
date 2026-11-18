@@ -3,6 +3,12 @@
 # (no todo!() left). A crate in docs/ARCHITECTURE.md marked "pure" is not
 # done until it is listed here. Platform crates (fp-win, fp-layered,
 # fp-overlay, fp-ui, fp-net, frostpane) never appear here.
+#
+# The macOS/Linux backend crates (fp-mac, fp-x11, fp-wayland, fp-linux) are
+# listed because the gate runs on Windows, where each compiles to its
+# platform-free `logic.rs` only (the OS code is cfg'd out). So the gate
+# measures exactly their logic modules; their OS code is checked by the
+# macOS/Linux CI tests and smoke runs instead.
 fp-core
 fp-text
 fp-paint
@@ -20,3 +26,7 @@ fp-characters
 fp-fight
 fp-world
 fp-platform
+fp-mac
+fp-x11
+fp-wayland
+fp-linux
