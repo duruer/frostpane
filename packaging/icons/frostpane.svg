@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2F6FE4"/>
+      <stop offset="1" stop-color="#0D2257"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0A1A45"/>
+      <stop offset="1" stop-color="#1C4596"/>
+    </linearGradient>
+    <linearGradient id="snow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D6E6FB"/>
+    </linearGradient>
+    <linearGradient id="frame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4F8FF"/>
+      <stop offset="1" stop-color="#C9DAF5"/>
+    </linearGradient>
+    <filter id="drop" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#04102E" flood-opacity="0.45"/>
+    </filter>
+    <clipPath id="panes"><rect x="262" y="330" width="500" height="460" rx="34"/></clipPath>
+  </defs>
+
+  <!-- tile -->
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#bg)"/>
+  <ellipse cx="300" cy="190" rx="420" ry="260" fill="#FFFFFF" opacity="0.07"/>
+
+  <g filter="url(#drop)">
+    <!-- glass with night sky -->
+    <rect x="262" y="330" width="500" height="460" rx="34" fill="url(#glass)"/>
+    <g clip-path="url(#panes)">
+      <circle cx="330" cy="420" r="9" fill="#FFFFFF" opacity="0.9"/>
+      <circle cx="440" cy="385" r="6" fill="#FFFFFF" opacity="0.7"/>
+      <circle cx="400" cy="480" r="7" fill="#FFFFFF" opacity="0.8"/>
+      <circle cx="600" cy="400" r="8" fill="#FFFFFF" opacity="0.85"/>
+      <circle cx="690" cy="470" r="6" fill="#FFFFFF" opacity="0.7"/>
+      <circle cx="320" cy="640" r="7" fill="#FFFFFF" opacity="0.75"/>
+      <circle cx="455" cy="700" r="9" fill="#FFFFFF" opacity="0.9"/>
+      <circle cx="600" cy="660" r="6" fill="#FFFFFF" opacity="0.7"/>
+      <circle cx="700" cy="610" r="9" fill="#FFFFFF" opacity="0.85"/>
+      <!-- frost glint -->
+      <path d="M262 600 L470 330 L540 330 L262 690 Z" fill="#FFFFFF" opacity="0.06"/>
+      <!-- snow resting on the sill inside the bottom panes -->
+      <path d="M262 790 L262 760 Q330 726 400 748 Q470 770 512 752 Q570 728 640 750 Q710 772 762 744 L762 790 Z" fill="url(#snow)"/>
+    </g>
+    <!-- frame and mullions -->
+    <rect x="262" y="330" width="500" height="460" rx="34" fill="none" stroke="url(#frame)" stroke-width="40"/>
+    <rect x="494" y="330" width="36" height="460" fill="url(#frame)"/>
+    <rect x="262" y="542" width="500" height="36" fill="url(#frame)"/>
+    <!-- snowdrift settled on top of the window -->
+    <path d="M222 352 Q214 300 270 292 Q300 236 372 258 Q420 214 488 244 Q540 206 604 240 Q668 218 706 262 Q776 258 800 312 Q812 348 790 360 L234 360 Q222 360 222 352 Z" fill="url(#snow)"/>
+    <!-- drip of snow over the frame edge -->
+    <path d="M330 356 Q336 392 350 356 Z M612 356 Q620 400 636 356 Z" fill="#FFFFFF"/>
+  </g>
+
+  <!-- sparkle -->
+  <g transform="translate(790 214)" fill="#FFFFFF">
+    <path d="M0 -54 C8 -14 14 -8 54 0 C14 8 8 14 0 54 C-8 14 -14 8 -54 0 C-14 -8 -8 -14 0 -54 Z"/>
+  </g>
+  <circle cx="842" cy="318" r="10" fill="#FFFFFF" opacity="0.85"/>
+</svg>

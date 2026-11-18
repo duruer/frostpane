@@ -24,6 +24,8 @@ eframe.workspace = true
 log.workspace = true
 # Memory-mapped system font files (already in the tree through eframe).
 memmap2 = "0.9.12"
+# App icon PNGs (already in the tree through eframe).
+image.workspace = true
 
 # Tray: the crates' default (GTK) menus everywhere but Linux; Linux uses the
 # GTK-free StatusNotifierItem host.

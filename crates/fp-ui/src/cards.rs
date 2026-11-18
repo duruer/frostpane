@@ -1045,8 +1045,8 @@ impl Cards {
                 let mut inner = ui.new_child(UiBuilder::new().max_rect(card.shrink2(vec2(24.0, 22.0))));
                 let ui = &mut inner;
                 ui.horizontal(|ui| {
-                    if let Some(t) = tex.pixmap(ui.ctx(), "mascot:48", |s| crate::home::mascot_pixmap(48.0, s, false)) {
-                        let (r, _) = ui.allocate_exact_size(vec2(38.4, 48.0), Sense::hover());
+                    if let Some(t) = tex.app_icon(ui.ctx(), 48.0) {
+                        let (r, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
                         ui.painter().image(
                             t.id(),
                             r,

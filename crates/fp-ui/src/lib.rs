@@ -126,6 +126,7 @@ pub fn viewport_builder(
         .with_maximize_button(false)
         .with_decorations(!custom_chrome)
         .with_visible(visible)
+        .with_icon(art::app_icon_data().unwrap_or_default())
 }
 
 /// Shader-visible descriptors the egui device reserves: one per live texture
