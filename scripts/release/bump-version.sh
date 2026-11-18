@@ -18,11 +18,14 @@ awk -v v="$ver" '
 ' Cargo.toml > Cargo.toml.new
 mv Cargo.toml.new Cargo.toml
 
-# Cargo.lock: path (workspace) packages have no `source` line. Rewrite their
-# version only. The lock is read and written with LF endings.
-awk -v v="$ver" '
-  function flush(   i) { for (i = 0; i < n; i++) { if (inblk && !src && buf[i] ~ /^version = /) print "version = \"" v "\""; else print buf[i] } n = 0 }
-  /^\[\[package\]\]/ { flush(); src = 0; inblk = 1 }
+# Cargo.lock: rewrite the version of the workspace members only. They are
+# path packages (no `source` line), but so are vendored crates under vendor/,
+# which keep their own versions. The lock is read and written with LF endings.
+members="$(sed -n 's/^name = "\(.*\)"$/\1/p' crates/*/Cargo.toml app/*/Cargo.toml | tr '\n' ' ')"
+awk -v v="$ver" -v members=" $members" '
+  function flush(   i) { for (i = 0; i < n; i++) { if (inblk && !src && mine && buf[i] ~ /^version = /) print "version = \"" v "\""; else print buf[i] } n = 0 }
+  /^\[\[package\]\]/ { flush(); src = 0; mine = 0; inblk = 1 }
+  /^name = / { nm = $3; gsub(/"/, "", nm); mine = index(members, " " nm " ") > 0 }
   /^source = / { src = 1 }
   { buf[n++] = $0 }
   END { flush() }
