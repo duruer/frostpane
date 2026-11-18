@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.3](https://github.com/duruer/frostpane/compare/v1.1.2...v1.1.3) (2026-11-18)
+
+
+### Bug Fixes
+
+* **release:** read workspace member names from CRLF manifests ([89d9ccb](https://github.com/duruer/frostpane/commit/89d9ccb4b59d7bc45b6bc870be215f9d24874ea2))
+* **release:** repair the member-name match in the version bump script ([5326803](https://github.com/duruer/frostpane/commit/53268035cad8871d1992cea0aedf4f16d74e809f))
+
 ## [1.1.2](https://github.com/duruer/frostpane/compare/v1.1.1...v1.1.2) (2026-11-18)
 
 
