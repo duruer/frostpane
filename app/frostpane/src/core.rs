@@ -53,6 +53,19 @@ const SHELVES_EVERY_S: f64 = 1.0;
 const HOVER_EVERY_S: f64 = 0.1;
 /// A quit that the window loop has not completed after this long is forced.
 const FORCE_EXIT_S: f64 = 3.0;
+/// egui pass cadence while the main window or a card shows.
+const UI_REPAINT: Duration = Duration::from_millis(100);
+/// egui pass cadence while nothing of egui is on screen. Everything that
+/// changes then (tray, second launch, system events, cards opening) asks for
+/// a pass itself; this is only the safety net for `--seconds` without the
+/// driver timer. Each pass costs a few milliseconds, so 10 Hz while hidden
+/// was most of the idle CPU.
+const HIDDEN_REPAINT: Duration = Duration::from_secs(1);
+
+/// How soon the next egui pass is needed.
+fn repaint_every(visible: bool, cards_open: bool) -> Duration {
+    if visible || cards_open { UI_REPAINT } else { HIDDEN_REPAINT }
+}
 
 /// Everything `Core::new` needs from `main`.
 pub struct Config {
@@ -1246,7 +1259,7 @@ impl Core {
             // Cards draw inside the root `ui`, which a hidden window skips.
             self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
         }
-        self.ctx.request_repaint_after(Duration::from_millis(100));
+        self.ctx.request_repaint_after(repaint_every(self.visible, self.cards.any_open()));
     }
 
     /// The root `ui`: the main window while visible, and the cards.
@@ -1448,6 +1461,15 @@ mod tests {
     use fp_core::geom::PixelRect;
     use fp_core::settings::City;
     use fp_win::WallpaperScreen;
+
+    #[test]
+    fn egui_passes_slow_down_while_nothing_shows() {
+        assert_eq!(repaint_every(true, false), UI_REPAINT);
+        assert_eq!(repaint_every(false, true), UI_REPAINT);
+        assert_eq!(repaint_every(true, true), UI_REPAINT);
+        assert_eq!(repaint_every(false, false), HIDDEN_REPAINT);
+        assert!(HIDDEN_REPAINT > UI_REPAINT);
+    }
 
     #[test]
     fn packs_done_fires_once_when_the_worker_finishes() {
