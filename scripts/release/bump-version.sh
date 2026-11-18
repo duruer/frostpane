@@ -27,8 +27,7 @@ members="$(cat crates/*/Cargo.toml app/*/Cargo.toml | tr -d '\r' | sed -n 's/^na
 awk -v v="$ver" -v members=" $members" '
   function flush(   i) { for (i = 0; i < n; i++) { if (inblk && !src && mine && buf[i] ~ /^version = /) print "version = \"" v "\""; else print buf[i] } n = 0 }
   /^\[\[package\]\]/ { flush(); src = 0; mine = 0; inblk = 1 }
-  /^name = / { nm = $3; gsub(/["
-]/, "", nm); mine = index(members, " " nm " ") > 0 }
+  /^name = / { nm = $3; gsub(/["\r]/, "", nm); mine = index(members, " " nm " ") > 0 }
   /^source = / { src = 1 }
   { buf[n++] = $0 }
   END { flush() }
