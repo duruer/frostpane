@@ -307,13 +307,22 @@ mod tests {
         send(WM_POWERBROADCAST, logic::PBT_APMPOWERSTATUSCHANGE, 0);
         send(WM_WTSSESSION_CHANGE, logic::WTS_SESSION_UNLOCK, 0);
         send(WM_POWERBROADCAST, logic::PBT_APMRESUMEAUTOMATIC, 0);
-        // Display off through a real POWERBROADCAST_SETTING payload.
-        let mut setting = POWERBROADCAST_SETTING { PowerSetting: GUID_CONSOLE_DISPLAY_STATE, DataLength: 4, Data: [0] };
+        // POWERBROADCAST_SETTING header followed by its full 4-byte payload.
+        // `POWERBROADCAST_SETTING::Data` is declared as `[u8; 1]`, so the
+        // payload needs its own storage or the handler reads past the struct.
+        #[repr(C)]
+        struct Setting {
+            guid: GUID,
+            len: u32,
+            data: u32,
+        }
+        // Display off through a real POWERBROADCAST_SETTING layout.
+        let mut setting = Setting { guid: GUID_CONSOLE_DISPLAY_STATE, len: 4, data: 0 };
         send(WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE, &mut setting as *mut _ as isize);
         // Another GUID is ignored.
-        let mut other = POWERBROADCAST_SETTING { PowerSetting: GUID::zeroed(), DataLength: 4, Data: [1] };
+        let mut other = Setting { guid: GUID::zeroed(), len: 4, data: 1 };
         send(WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE, &mut other as *mut _ as isize);
-        setting.Data = [2];
+        setting.data = 2;
         send(WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE, &mut setting as *mut _ as isize);
         let theme: Vec<u16> = "ImmersiveColorSet\0".encode_utf16().collect();
         send(WM_SETTINGCHANGE, 0, theme.as_ptr() as isize);
