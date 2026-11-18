@@ -60,6 +60,31 @@ fn entry(kind: PassKind) -> Entry {
     Entry { module, vs, fs, storage }
 }
 
+/// Every pass kind, in [`PassKind`] order.
+pub const KINDS: [PassKind; 10] = [
+    PassKind::SnowDrift,
+    PassKind::SnowFlakes,
+    PassKind::SnowLoose,
+    PassKind::RainFlash,
+    PassKind::RainRipples,
+    PassKind::RainStrokes,
+    PassKind::Petals,
+    PassKind::StarTrails,
+    PassKind::Stars,
+    PassKind::Fireflies,
+];
+
+/// The pass kinds one weather draws, so all of them can be built as soon as
+/// the first one shows up.
+pub fn family(kind: PassKind) -> &'static [PassKind] {
+    match kind {
+        PassKind::SnowDrift | PassKind::SnowFlakes | PassKind::SnowLoose => &KINDS[0..3],
+        PassKind::RainFlash | PassKind::RainRipples | PassKind::RainStrokes => &KINDS[3..6],
+        PassKind::Petals => &KINDS[6..7],
+        PassKind::StarTrails | PassKind::Stars | PassKind::Fireflies => &KINDS[7..10],
+    }
+}
+
 /// Storage buffers a pass kind binds (bindings 2..).
 pub fn storage_count(kind: PassKind) -> usize {
     entry(kind).storage
@@ -93,6 +118,26 @@ pub struct Gpu {
     pipeline_layouts: Vec<wgpu::PipelineLayout>,
     modules: Mutex<HashMap<Module, wgpu::ShaderModule>>,
     pipelines: Mutex<HashMap<PassKind, Arc<wgpu::RenderPipeline>>>,
+    /// First kind of every family whose pipelines are built or being built.
+    warmed: Mutex<Vec<PassKind>>,
+}
+
+/// Shader-visible descriptors the overlay device reserves. Each pass slot
+/// holds at most four buffer bindings, so a few thousand is far more than
+/// any frame needs.
+pub const DESCRIPTORS: u32 = 4096;
+
+/// Device settings of the overlay: small GPU memory blocks and a small
+/// descriptor heap. The defaults (`Performance` memory hint, one million
+/// descriptors) commit about 270 MB per device up front; on an integrated GPU
+/// that is ordinary process memory. With these the device costs about 30 MB.
+pub fn device_descriptor() -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor {
+        label: Some("frostpane overlay"),
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        required_limits: wgpu::Limits { max_non_sampler_bindings: DESCRIPTORS, ..Default::default() },
+        ..Default::default()
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -146,6 +191,7 @@ impl Gpu {
             pipeline_layouts,
             modules: Mutex::new(HashMap::new()),
             pipelines: Mutex::new(HashMap::new()),
+            warmed: Mutex::new(Vec::new()),
         }
     }
 
@@ -162,8 +208,8 @@ impl Gpu {
                 }))
             })
             .map_err(|e| format!("no adapter: {e}"))?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-            .map_err(|e| format!("no device: {e}"))?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&device_descriptor())).map_err(|e| format!("no device: {e}"))?;
         Ok(Self::new(device, queue))
     }
 
@@ -182,6 +228,37 @@ impl Gpu {
     }
 
     /// The pipeline of a pass kind, built on first use.
+    /// Builds the pipelines of every family `list` draws on a background
+    /// thread, once per family. A pass kind first seen mid-run (the ground
+    /// drift once snow piles up, loose snow on the first sweep) otherwise
+    /// compiles its shaders on the render thread and drops frames. Only the
+    /// families in use are built: all of them cost about 40 MB.
+    pub fn warm_families(self: &Arc<Self>, list: &DrawList) {
+        let mut new = Vec::new();
+        {
+            let mut warmed = lock(&self.warmed);
+            for pass in &list.passes {
+                let fam = family(pass.kind);
+                if !warmed.contains(&fam[0]) {
+                    warmed.push(fam[0]);
+                    new.push(fam);
+                }
+            }
+        }
+        if new.is_empty() {
+            return;
+        }
+        let g = self.clone();
+        let spawned = std::thread::Builder::new().name("frostpane overlay warm-up".into()).spawn(move || {
+            for kind in new.into_iter().flatten() {
+                g.pipeline(*kind);
+            }
+        });
+        if let Err(e) = spawned {
+            log::warn!("overlay: pipeline warm-up thread failed: {e}");
+        }
+    }
+
     pub fn pipeline(&self, kind: PassKind) -> Arc<wgpu::RenderPipeline> {
         if let Some(p) = lock(&self.pipelines).get(&kind) {
             return p.clone();
@@ -227,8 +304,9 @@ impl Gpu {
     /// of `list` in order. `None` only clears.
     pub fn render(&self, slots: &mut Slots, view: &wgpu::TextureView, list: Option<&DrawList>) {
         let mut jobs: Vec<(Arc<wgpu::RenderPipeline>, u32, u32)> = Vec::new();
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("overlay") });
         if let Some(list) = list {
-            self.queue.write_buffer(&slots.scene, 0, bytemuck::bytes_of(&list.scene));
+            slots.begin(&list.scene);
             for pass in &list.passes {
                 if pass.vertices == 0 || pass.instances == 0 {
                     continue;
@@ -239,11 +317,11 @@ impl Gpu {
                     continue;
                 }
                 let idx = jobs.len();
-                slots.prepare(self, idx, pass);
+                slots.stage(idx, pass);
                 jobs.push((self.pipeline(pass.kind), pass.vertices, pass.instances));
             }
+            slots.upload(self, &mut enc, jobs.len());
         }
-        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("overlay") });
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("overlay frame"),
@@ -267,7 +345,9 @@ impl Gpu {
                 rp.draw(0..*vertices, 0..*instances);
             }
         }
+        slots.belt.finish();
         self.queue.submit([enc.finish()]);
+        slots.belt.recall();
     }
 
     /// Renders a list into a fresh `width` x `height` image (BGRA bytes,
@@ -344,100 +424,148 @@ impl Image {
     }
 }
 
+/// Smallest staging chunk; a frame of heavy snow packs to a few hundred KB.
+const STAGING_CHUNK: u64 = 256 * 1024;
+
 struct Slot {
     kind: PassKind,
-    uniform: wgpu::Buffer,
-    buffers: Vec<(wgpu::Buffer, u64)>,
+    /// Reserved bytes per storage binding; grows, never shrinks, so the
+    /// packed layout (and the bind group) stays put from frame to frame.
+    caps: Vec<u64>,
+    /// `(offset, size)` of the uniform block, then of each storage binding,
+    /// for the frame being staged.
+    want: Vec<(u64, u64)>,
+    /// The ranges and upload buffer generation `group` was built for.
+    built: Vec<(u64, u64)>,
+    built_gen: u64,
     group: Option<wgpu::BindGroup>,
 }
 
-/// Per-render-thread buffers: the scene uniform and one slot per pass index.
-/// Reused every frame; grown on demand. Pass `n` of a frame always uses slot
-/// `n`, so two passes of one submit never share a buffer.
+/// Per-render-thread GPU data: the scene uniform and one slot per pass index,
+/// all packed into one upload buffer that is written once per frame. Reused
+/// every frame; grown on demand. Pass `n` of a frame always uses slot `n`,
+/// so two passes of one submit never share a range.
 pub struct Slots {
-    scene: wgpu::Buffer,
-    slots: Vec<Option<Slot>>,
+    packer: plan::Packer,
+    /// Reused mapped staging chunks for the per-frame upload. A plain
+    /// `write_buffer` creates and destroys a staging buffer every call, which
+    /// was the largest CPU cost of a frame after the driver's own work.
+    belt: wgpu::util::StagingBelt,
+    upload: Option<(wgpu::Buffer, u64)>,
+    /// Bumped whenever the upload buffer is replaced.
+    generation: u64,
+    scene: (u64, u64),
+    uniform_align: u64,
+    storage_align: u64,
+    slots: Vec<Slot>,
 }
 
 impl Slots {
     pub fn new(gpu: &Gpu) -> Self {
-        Self { scene: make_uniform(&gpu.device, 16), slots: Vec::new() }
+        let limits = gpu.device.limits();
+        Self {
+            packer: plan::Packer::default(),
+            belt: wgpu::util::StagingBelt::new(gpu.device.clone(), STAGING_CHUNK),
+            upload: None,
+            generation: 0,
+            scene: (0, 16),
+            uniform_align: u64::from(limits.min_uniform_buffer_offset_alignment),
+            storage_align: u64::from(limits.min_storage_buffer_offset_alignment),
+            slots: Vec::new(),
+        }
     }
 
-    /// Writes `pass` into slot `idx`, growing its buffers and rebuilding the
-    /// bind group when needed.
-    fn prepare(&mut self, gpu: &Gpu, idx: usize, pass: &fp_core::gpu::Pass) {
+    /// Starts packing a frame with its scene block.
+    fn begin(&mut self, scene: &[f32; 4]) {
+        self.packer.clear();
+        self.scene = self.packer.place(bytemuck::bytes_of(scene), 16, self.uniform_align);
+    }
+
+    /// Packs `pass` for slot `idx` (uniform block, then its storage buffers).
+    fn stage(&mut self, idx: usize, pass: &fp_core::gpu::Pass) {
         let need = storage_count(pass.kind);
         while self.slots.len() <= idx {
-            self.slots.push(None);
+            self.slots.push(Slot {
+                kind: pass.kind,
+                caps: Vec::new(),
+                want: Vec::new(),
+                built: Vec::new(),
+                built_gen: 0,
+                group: None,
+            });
         }
-        let scene = &self.scene;
-        let slot = self.slots[idx].get_or_insert_with(|| Slot {
-            kind: pass.kind,
-            uniform: make_uniform(&gpu.device, (plan::UNIFORM_FLOATS * 4) as u64),
-            buffers: Vec::new(),
-            group: None,
-        });
-        let mut rebuild = slot.group.is_none() || slot.kind != pass.kind;
-        slot.kind = pass.kind;
+        let slot = &mut self.slots[idx];
+        if slot.kind != pass.kind {
+            slot.kind = pass.kind;
+            slot.group = None;
+        }
         let (block, cut) = plan::uniform_block(&pass.uniforms);
         if cut {
             log::warn!("overlay: {:?} uniforms cut to {} floats", pass.kind, plan::UNIFORM_FLOATS);
         }
+        slot.want.clear();
+        let uniform_size = (plan::UNIFORM_FLOATS * 4) as u64;
+        slot.want.push(self.packer.place(bytemuck::cast_slice(&block), uniform_size, self.uniform_align));
+        slot.caps.resize(need, 0);
         for (j, data) in pass.buffers.iter().take(need).enumerate() {
-            let want = plan::buffer_capacity(plan::padded_len(data.len()));
-            if slot.buffers.len() <= j || slot.buffers[j].1 < want {
-                let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("overlay storage"),
-                    size: want,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                if slot.buffers.len() <= j {
-                    slot.buffers.push((buf, want));
-                } else {
-                    slot.buffers[j] = (buf, want);
-                }
-                rebuild = true;
-            }
-            let buf = &slot.buffers[j].0;
-            if data.len() % 4 == 0 {
-                gpu.queue.write_buffer(buf, 0, data);
-            } else {
-                let mut padded = data.clone();
-                padded.resize(plan::padded_len(data.len()), 0);
-                gpu.queue.write_buffer(buf, 0, &padded);
-            }
+            let cap = &mut slot.caps[j];
+            *cap = (*cap).max(plan::buffer_capacity(plan::padded_len(data.len())));
+            slot.want.push(self.packer.place(data, *cap, self.storage_align));
         }
-        gpu.queue.write_buffer(&slot.uniform, 0, bytemuck::cast_slice(&block));
-        if rebuild {
-            let mut entries = vec![
-                wgpu::BindGroupEntry { binding: 0, resource: scene.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: slot.uniform.as_entire_binding() },
-            ];
-            for (j, (buf, _)) in slot.buffers.iter().take(need).enumerate() {
-                entries.push(wgpu::BindGroupEntry { binding: 2 + j as u32, resource: buf.as_entire_binding() });
+    }
+
+    /// Writes the packed frame in one go (growing the buffer when needed)
+    /// and rebuilds the bind groups of the first `used` slots whose ranges
+    /// moved.
+    fn upload(&mut self, gpu: &Gpu, enc: &mut wgpu::CommandEncoder, used: usize) {
+        let bytes = self.packer.bytes();
+        let len = bytes.len() as u64;
+        if self.upload.as_ref().is_none_or(|(_, cap)| *cap < len) {
+            let cap = plan::buffer_capacity(len as usize);
+            let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("overlay frame data"),
+                size: cap,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.upload = Some((buf, cap));
+            self.generation += 1;
+            // Chunks as large as the buffer: the belt never keeps a pile of
+            // outgrown small chunks around.
+            self.belt = wgpu::util::StagingBelt::new(gpu.device.clone(), cap.max(STAGING_CHUNK));
+        }
+        let Some((buf, _)) = &self.upload else { return };
+        if let Some(size) = wgpu::BufferSize::new(len) {
+            self.belt.write_buffer(enc, buf, 0, size).copy_from_slice(bytes);
+        }
+        let binding = |(offset, size): (u64, u64)| {
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: buf,
+                offset,
+                size: wgpu::BufferSize::new(size),
+            })
+        };
+        for slot in self.slots.iter_mut().take(used) {
+            if slot.group.is_some() && slot.built_gen == self.generation && slot.built == slot.want {
+                continue;
+            }
+            let mut entries = vec![wgpu::BindGroupEntry { binding: 0, resource: binding(self.scene) }];
+            for (j, r) in slot.want.iter().enumerate() {
+                entries.push(wgpu::BindGroupEntry { binding: 1 + j as u32, resource: binding(*r) });
             }
             slot.group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("overlay pass"),
-                layout: &gpu.layouts[need],
+                layout: &gpu.layouts[slot.want.len() - 1],
                 entries: &entries,
             }));
+            slot.built.clone_from(&slot.want);
+            slot.built_gen = self.generation;
         }
     }
 
     fn group(&self, idx: usize) -> &wgpu::BindGroup {
-        self.slots[idx].as_ref().and_then(|s| s.group.as_ref()).expect("slot prepared before drawing")
+        self.slots[idx].group.as_ref().expect("slot prepared before drawing")
     }
-}
-
-fn make_uniform(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("overlay uniform"),
-        size,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
 }
 
 #[cfg(test)]
@@ -769,19 +897,37 @@ mod tests {
     }
 
     #[test]
+    fn families_cover_every_kind_once() {
+        for kind in KINDS {
+            assert!(family(kind).contains(&kind));
+        }
+        let firsts = KINDS.iter().filter(|k| family(**k)[0] == **k).count();
+        assert_eq!(firsts, 4);
+    }
+
+    #[test]
+    fn warm_families_builds_a_family_once() {
+        // Its own device: the shared test device must not race other tests.
+        let Ok(own) = Gpu::headless().map(Arc::new) else { return };
+        let mut d = list();
+        d.instanced(PassKind::RainRipples, vec![], &[RainRipple::default()]);
+        own.warm_families(&d);
+        own.warm_families(&d);
+        assert_eq!(*lock(&own.warmed), vec![PassKind::RainFlash]);
+        // The background thread builds the whole rain family.
+        for _ in 0..500 {
+            if lock(&own.pipelines).len() == 3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let built = lock(&own.pipelines);
+        assert!(family(PassKind::RainFlash).iter().all(|k| built.contains_key(k)));
+    }
+
+    #[test]
     fn entries_cover_every_kind() {
-        let kinds = [
-            PassKind::SnowDrift,
-            PassKind::SnowFlakes,
-            PassKind::SnowLoose,
-            PassKind::RainFlash,
-            PassKind::RainRipples,
-            PassKind::RainStrokes,
-            PassKind::Petals,
-            PassKind::StarTrails,
-            PassKind::Stars,
-            PassKind::Fireflies,
-        ];
+        let kinds = KINDS;
         assert_eq!(kinds.iter().map(|k| storage_count(*k)).sum::<usize>(), 10);
         assert_eq!(blend_state(kinds[0].blend()).color.dst_factor, wgpu::BlendFactor::OneMinusSrcAlpha);
         assert_eq!(blend_state(PassKind::Stars.blend()).color.dst_factor, wgpu::BlendFactor::One);

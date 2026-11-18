@@ -63,3 +63,7 @@ dbg_macro = "warn"
 [profile.release]
 lto = "thin"
 codegen-units = 4
+
+[profile.profiling]
+inherits = "release"
+debug = true

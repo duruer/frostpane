@@ -139,6 +139,7 @@ fn main() -> eframe::Result {
 
     let opts = eframe::NativeOptions {
         viewport: fp_ui::viewport_builder(lang, settings.seen_welcome, work_height, true, !quiet_start),
+        wgpu_options: fp_ui::wgpu_options(),
         ..Default::default()
     };
     let open_request = Arc::new(AtomicBool::new(false));

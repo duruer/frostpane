@@ -1546,6 +1546,7 @@ dependencies = [
  "fp-world",
  "image",
  "log",
+ "memmap2",
  "muda",
  "tray-icon",
  "windows",

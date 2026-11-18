@@ -113,7 +113,10 @@ fn surface_config(size: (u32, u32)) -> wgpu::SurfaceConfiguration {
         width: size.0,
         height: size.1,
         present_mode: wgpu::PresentMode::Fifo,
-        desired_maximum_frame_latency: 2,
+        // Two swap chain buffers (desktop-native 3.2); wgpu adds one buffer
+        // to the latency. Each extra full-screen buffer is 4 bytes a pixel of
+        // committed memory on an integrated GPU.
+        desired_maximum_frame_latency: 1,
         alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
         view_formats: vec![],
         color_space: Default::default(),
@@ -413,6 +416,8 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
     let mut next = epoch;
     let (mut main_list, mut above_list) = (DrawList::default(), DrawList::default());
     let mut paused = false;
+    let stats_on = log::log_enabled!(log::Level::Debug);
+    let mut stats = plan::FrameStats::new(0.0);
     while !sh.stop.load(Ordering::Relaxed) {
         {
             let run = lock(&sh.run);
@@ -425,6 +430,7 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
         if paused {
             paused = false;
             timer.reset();
+            stats.pause();
             next = Instant::now();
         }
         let now = Instant::now();
@@ -436,10 +442,15 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
         let dt = timer.tick(time);
         let work = prepare(&sh, dt, time, &mut main_list, &mut above_list);
         if work.main == Job::Idle && work.above.is_none() {
+            stats.pause();
             std::thread::sleep(Duration::from_millis(50));
             next = Instant::now();
             continue;
         }
+        if work.main == Job::Draw {
+            gpu.warm_families(&main_list);
+        }
+        let prepared = epoch.elapsed().as_secs_f64();
         let list = match work.main {
             Job::Draw => Some(&main_list),
             _ => None,
@@ -451,6 +462,22 @@ fn render_loop(sh: Arc<Loop>, gpu: Arc<Gpu>, gate: Arc<RwLock<()>>) {
             // The above panel has the main panel's size (3.3).
             let list = (job == Job::Draw).then_some(&above_list);
             present(&gpu, &gate, &mut slots, &target, swap, list);
+        }
+        if stats_on {
+            let done = epoch.elapsed().as_secs_f64();
+            stats.frame(time, prepared - time, done - prepared, frame_time.as_secs_f64());
+            if let Some(r) = stats.report(done) {
+                log::debug!(
+                    "overlay frames: {} ({:.1} fps), gap avg {:.2} ms max {:.2} ms, {} late; prepare {:.3} ms, present {:.3} ms",
+                    r.frames,
+                    r.fps,
+                    r.gap_avg_ms,
+                    r.gap_max_ms,
+                    r.late,
+                    r.prepare_ms,
+                    r.present_ms
+                );
+            }
         }
     }
 }
@@ -793,7 +820,7 @@ impl Host {
         }))
         .map_err(|e| format!("no adapter: {e}"))
         .and_then(|adapter| {
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            pollster::block_on(adapter.request_device(&crate::gpu::device_descriptor()))
                 .map_err(|e| format!("no device: {e}"))
         });
         let (device, queue) = match device {

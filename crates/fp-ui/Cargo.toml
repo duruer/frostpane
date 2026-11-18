@@ -24,6 +24,8 @@ eframe.workspace = true
 tray-icon.workspace = true
 muda.workspace = true
 log.workspace = true
+# Memory-mapped system font files (already in the tree through eframe).
+memmap2 = "0.9.12"
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

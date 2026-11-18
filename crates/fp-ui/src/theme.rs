@@ -165,16 +165,33 @@ fn baseline_centre(b: &[u8]) -> Option<f32> {
     (upm > 0.0).then(|| (a + d - g) as f32 / 2.0 / upm)
 }
 
+/// Shared bytes of a font file (owned or memory-mapped).
+pub type FontBytes = Arc<dyn AsRef<[u8]> + Send + Sync>;
+
+/// A font file, memory-mapped: the pages are shared with the system's font
+/// cache and only the parts egui reads get paged in, instead of private
+/// copies (the three CJK bold faces alone are about 40 MB). Falls back to
+/// reading the file.
+pub fn font_file(path: &str) -> Option<FontBytes> {
+    let file = std::fs::File::open(path).ok()?;
+    // SAFETY: system font files are not truncated or rewritten while the
+    // process runs; the map stays valid for the life of the font set.
+    match unsafe { memmap2::Mmap::map(&file) } {
+        Ok(map) => Some(Arc::new(map)),
+        Err(_) => std::fs::read(path).ok().map(|b| Arc::new(b) as FontBytes),
+    }
+}
+
 /// Font set with a `bold` family: the bold face first, then the CJK bold
 /// faces, then the regular proportional chain (symbol fallback). Without a
 /// bold face the family is just the regular chain, so text never goes missing.
-pub fn font_definitions(bold_face: Option<Vec<u8>>, cjk_bold: Vec<(String, Vec<u8>)>) -> FontDefinitions {
+pub fn font_definitions(bold_face: Option<FontBytes>, cjk_bold: Vec<(String, FontBytes)>) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let mut chain = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let primary = bold_face.as_deref().and_then(baseline_centre);
+    let primary = bold_face.as_deref().and_then(|b| baseline_centre(b.as_ref()));
     for (at, (name, bytes)) in cjk_bold.into_iter().enumerate() {
-        let centre = baseline_centre(&bytes);
-        let mut data = FontData::from_owned(bytes);
+        let centre = baseline_centre((*bytes).as_ref());
+        let mut data = FontData::from_blob(bytes, 0);
         // Line the CJK baseline up with the Latin one (mixed-font rows).
         if let (Some(p), Some(c)) = (primary, centre) {
             data = data.tweak(FontTweak { y_offset_factor: p - c, ..FontTweak::default() });
@@ -183,7 +200,7 @@ pub fn font_definitions(bold_face: Option<Vec<u8>>, cjk_bold: Vec<(String, Vec<u
         chain.insert(at, name);
     }
     if let Some(bytes) = bold_face {
-        fonts.font_data.insert("bold-face".into(), Arc::new(FontData::from_owned(bytes)));
+        fonts.font_data.insert("bold-face".into(), Arc::new(FontData::from_blob(bytes, 0)));
         chain.insert(0, "bold-face".into());
     }
     fonts.families.insert(FontFamily::Name(BOLD_FAMILY.into()), chain);
@@ -192,8 +209,8 @@ pub fn font_definitions(bold_face: Option<Vec<u8>>, cjk_bold: Vec<(String, Vec<u
 
 /// Register the bold family on `ctx`.
 pub fn install_fonts(ctx: &Context) {
-    let face = BOLD_FACES.iter().find_map(|p| std::fs::read(p).ok());
-    let cjk = CJK_BOLD_FACES.iter().filter_map(|(n, p)| std::fs::read(p).ok().map(|b| ((*n).to_string(), b))).collect();
+    let face = BOLD_FACES.iter().find_map(|p| font_file(p));
+    let cjk = CJK_BOLD_FACES.iter().filter_map(|(n, p)| font_file(p).map(|b| ((*n).to_string(), b))).collect();
     ctx.set_fonts(font_definitions(face, cjk));
 }
 
@@ -245,7 +262,8 @@ mod tests {
 
     #[test]
     fn bold_family_is_registered() {
-        let with = font_definitions(Some(vec![0]), vec![("bold-ja".into(), vec![0])]);
+        let bytes = || -> FontBytes { Arc::new(vec![0u8]) };
+        let with = font_definitions(Some(bytes()), vec![("bold-ja".into(), bytes())]);
         let chain = &with.families[&FontFamily::Name(BOLD_FAMILY.into())];
         assert_eq!(chain[0], "bold-face");
         assert_eq!(chain[1], "bold-ja");
@@ -256,6 +274,14 @@ mod tests {
     }
 
     #[test]
+    fn font_files_map_and_match_the_bytes() {
+        assert!(font_file("C:/no/such/font.ttf").is_none());
+        let Ok(want) = std::fs::read("C:/Windows/Fonts/segoeuib.ttf") else { return };
+        let mapped = font_file("C:/Windows/Fonts/segoeuib.ttf").expect("maps");
+        assert_eq!((*mapped).as_ref(), &want[..]);
+    }
+
+    #[test]
     fn cjk_baseline_is_aligned_to_latin() {
         assert_eq!(baseline_centre(&[0; 8]), None);
         let (Ok(latin), Ok(cjk)) =
@@ -263,7 +289,7 @@ mod tests {
         else {
             return;
         };
-        let defs = font_definitions(Some(latin.clone()), vec![("bold-ja".into(), cjk.clone())]);
+        let defs = font_definitions(Some(Arc::new(latin.clone())), vec![("bold-ja".into(), Arc::new(cjk.clone()))]);
         let want = baseline_centre(&latin).unwrap() - baseline_centre(&cjk).unwrap();
         assert!(want.abs() > 0.01, "fonts differ, so a tweak is needed");
         assert_eq!(defs.font_data["bold-ja"].tweak.y_offset_factor, want);

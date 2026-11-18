@@ -1,14 +1,27 @@
 //! A tiny stderr logger: `FROSTPANE_LOG=info|debug|trace|warn|error|off`
 //! (default `warn`). The release build has no console, so this only matters
-//! for developers and smoke runs.
+//! for developers and smoke runs. `info` and `debug` apply to Frostpane's own
+//! crates only; libraries stay at `warn` (the shader compiler alone writes
+//! thousands of debug lines, slow enough to stall the render threads).
+//! `trace` lets every crate through.
 
 use log::{LevelFilter, Log, Metadata, Record};
 
 struct Stderr(LevelFilter);
 
+/// True for log targets of the app and its `fp-*` crates.
+fn own(target: &str) -> bool {
+    target == "frostpane" || target.starts_with("frostpane::") || target.starts_with("fp_")
+}
+
+/// The level a target is logged at under the filter `max`.
+fn target_level(max: LevelFilter, target: &str) -> LevelFilter {
+    if max == LevelFilter::Trace || own(target) { max } else { max.min(LevelFilter::Warn) }
+}
+
 impl Log for Stderr {
     fn enabled(&self, m: &Metadata<'_>) -> bool {
-        m.level() <= self.0
+        m.level() <= target_level(self.0, m.target())
     }
 
     fn log(&self, r: &Record<'_>) {
@@ -66,5 +79,22 @@ mod tests {
         l.flush();
         init();
         init();
+    }
+
+    #[test]
+    fn debug_is_for_own_crates_only() {
+        let l = Stderr(LevelFilter::Debug);
+        let at = |target, level| Metadata::builder().target(target).level(level).build();
+        assert!(l.enabled(&at("frostpane", log::Level::Debug)));
+        assert!(l.enabled(&at("frostpane::balls", log::Level::Debug)));
+        assert!(l.enabled(&at("fp_overlay::win", log::Level::Debug)));
+        assert!(!l.enabled(&at("naga::front", log::Level::Debug)));
+        assert!(!l.enabled(&at("wgpu_core", log::Level::Info)));
+        assert!(l.enabled(&at("wgpu_core", log::Level::Warn)));
+        assert!(!l.enabled(&at("frostpaneish", log::Level::Debug)));
+        let all = Stderr(LevelFilter::Trace);
+        assert!(all.enabled(&at("naga::front", log::Level::Trace)));
+        let quiet = Stderr(LevelFilter::Error);
+        assert!(!quiet.enabled(&at("wgpu_core", log::Level::Warn)));
     }
 }

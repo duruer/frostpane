@@ -92,6 +92,39 @@ pub fn padded_len(len: usize) -> usize {
     len.next_multiple_of(4)
 }
 
+/// The bytes of one frame packed for a single upload: every binding at an
+/// aligned offset, each followed by its reserved slack, so one
+/// `write_buffer` per frame replaces one per binding (each write allocates a
+/// staging buffer, the main CPU cost of a frame on DX12).
+#[derive(Debug, Default)]
+pub struct Packer {
+    bytes: Vec<u8>,
+}
+
+impl Packer {
+    /// Starts a new frame (keeps the allocation).
+    pub fn clear(&mut self) {
+        self.bytes.clear();
+    }
+
+    /// Places `data` at the next multiple of `align` and reserves `reserve`
+    /// bytes for it (at least the data, padded to 4). Returns the binding's
+    /// `(offset, size)`; the size is the reservation.
+    pub fn place(&mut self, data: &[u8], reserve: u64, align: u64) -> (u64, u64) {
+        let offset = (self.bytes.len() as u64).next_multiple_of(align.max(4));
+        let size = reserve.max(padded_len(data.len()) as u64);
+        self.bytes.resize(offset as usize, 0);
+        self.bytes.extend_from_slice(data);
+        self.bytes.resize((offset + size) as usize, 0);
+        (offset, size)
+    }
+
+    /// The packed frame (a multiple of 4 bytes long).
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 /// Floats of the per-pass uniform block (4 x vec4).
 pub const UNIFORM_FLOATS: usize = 16;
 
@@ -214,6 +247,84 @@ impl Stager {
 
     pub fn pending(&self) -> bool {
         !self.queue.is_empty()
+    }
+}
+
+/// Frame pacing and per-frame cost of one render thread, summed over a
+/// report period (`FROSTPANE_LOG=debug`). Times are seconds.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FrameStats {
+    frames: u32,
+    last_start: Option<f64>,
+    gap_sum: f64,
+    gap_max: f64,
+    /// Frames that started more than 1.5 frame times after the previous one.
+    late: u32,
+    prepare: f64,
+    present: f64,
+    since: f64,
+}
+
+/// One line of [`FrameStats`]: averages in milliseconds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameReport {
+    pub frames: u32,
+    pub fps: f64,
+    pub gap_avg_ms: f64,
+    pub gap_max_ms: f64,
+    pub late: u32,
+    pub prepare_ms: f64,
+    pub present_ms: f64,
+}
+
+impl FrameStats {
+    pub const PERIOD: f64 = 10.0;
+
+    pub fn new(now: f64) -> Self {
+        Self { since: now, ..Self::default() }
+    }
+
+    /// Records a frame that started at `start` and spent `prepare` seconds
+    /// in the simulation and `present` seconds encoding and presenting.
+    pub fn frame(&mut self, start: f64, prepare: f64, present: f64, frame_time: f64) {
+        if let Some(last) = self.last_start {
+            let gap = start - last;
+            self.gap_sum += gap;
+            self.gap_max = self.gap_max.max(gap);
+            if gap > 1.5 * frame_time {
+                self.late += 1;
+            }
+        }
+        self.last_start = Some(start);
+        self.frames += 1;
+        self.prepare += prepare;
+        self.present += present;
+    }
+
+    /// A pause breaks the gap chain (the next frame is not late).
+    pub fn pause(&mut self) {
+        self.last_start = None;
+    }
+
+    /// The report once [`FrameStats::PERIOD`] has passed, then starts over.
+    pub fn report(&mut self, now: f64) -> Option<FrameReport> {
+        let span = now - self.since;
+        if span < Self::PERIOD || self.frames == 0 {
+            return None;
+        }
+        let n = f64::from(self.frames);
+        let gaps = f64::from(self.frames.saturating_sub(1).max(1));
+        let r = FrameReport {
+            frames: self.frames,
+            fps: n / span,
+            gap_avg_ms: 1000.0 * self.gap_sum / gaps,
+            gap_max_ms: 1000.0 * self.gap_max,
+            late: self.late,
+            prepare_ms: 1000.0 * self.prepare / n,
+            present_ms: 1000.0 * self.present / n,
+        };
+        *self = Self { last_start: self.last_start, ..Self::new(now) };
+        Some(r)
     }
 }
 
@@ -355,5 +466,46 @@ mod tests {
         s.at(0.0, 0.1, t1, Act::PlaceBehind);
         s.at(0.0, 0.1, t2, Act::AttachAbove);
         assert_eq!(s.due(1.0), vec![Act::AttachAbove]);
+    }
+
+    #[test]
+    fn frame_stats_report_pacing_and_cost() {
+        let ft = 1.0 / 60.0;
+        let mut st = FrameStats::new(0.0);
+        assert_eq!(st.report(20.0), None, "no frames, no report");
+        for i in 0..600 {
+            st.frame(f64::from(i) * ft, 0.001, 0.002, ft);
+        }
+        // one late frame, then a pause that does not count as late
+        st.frame(600.0 * ft + 0.1, 0.001, 0.002, ft);
+        st.pause();
+        st.frame(20.0, 0.001, 0.002, ft);
+        assert_eq!(st.report(5.0), None, "period not over");
+        let r = st.report(10.0).expect("report");
+        assert_eq!(r.frames, 602);
+        assert_eq!(r.late, 1);
+        assert!((r.prepare_ms - 1.0).abs() < 1e-9 && (r.present_ms - 2.0).abs() < 1e-9);
+        assert!(r.gap_max_ms > 100.0 && r.gap_avg_ms > 16.0 && r.fps > 60.0);
+        // starts over, but keeps the last start for the next gap
+        st.frame(20.0 + ft, 0.0, 0.0, ft);
+        let r = st.report(20.0).expect("second report");
+        assert_eq!((r.frames, r.late), (1, 0));
+        assert!((r.gap_avg_ms - 1000.0 * ft).abs() < 1e-6);
+    }
+
+    #[test]
+    fn packer_aligns_and_reserves() {
+        let mut p = Packer::default();
+        assert_eq!(p.place(&[1, 2, 3, 4], 0, 256), (0, 4));
+        // Next binding at the alignment; the reservation exceeds the data.
+        assert_eq!(p.place(&[5; 6], 512, 256), (256, 512));
+        // Odd data is padded to 4 when the reservation is smaller.
+        assert_eq!(p.place(&[7; 5], 0, 0), (768, 8));
+        assert_eq!(p.bytes().len(), 776);
+        assert_eq!(&p.bytes()[256..263], &[5, 5, 5, 5, 5, 5, 0]);
+        assert_eq!(p.bytes()[768..776], [7, 7, 7, 7, 7, 0, 0, 0]);
+        p.clear();
+        assert!(p.bytes().is_empty());
+        assert_eq!(p.place(&[], 16, 256), (0, 16));
     }
 }
