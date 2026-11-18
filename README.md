@@ -12,7 +12,7 @@ Snowballs you can throw, snowmen you can dress up. Free, forever.
 <p>
   <a href="https://github.com/duruer/frostpane/releases/latest"><img src="https://img.shields.io/github/v/release/duruer/frostpane?style=for-the-badge&color=2b6fe0&label=Download" alt="Download"></a>
   <a href="https://github.com/duruer/frostpane/releases"><img src="https://img.shields.io/github/downloads/duruer/frostpane/total?style=for-the-badge&color=5a88d6" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/Windows-x64%20%7C%20ARM64%20%7C%20x86-0b1a3a?style=for-the-badge&logo=windows11&logoColor=white" alt="Windows x64, ARM64 and x86">
+  <img src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-0b1a3a?style=for-the-badge" alt="Windows, macOS and Linux">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-1f8a55?style=for-the-badge" alt="GPLv3"></a>
 </p>
 
@@ -92,14 +92,40 @@ Every effect has a matching wallpaper, and each one can follow the time of day, 
 
 ## 📥 Get Frostpane
 
-1. Go to the [**latest release**](https://github.com/duruer/frostpane/releases/latest).
-2. Download the zip for your PC:
+Go to the [**latest release**](https://github.com/duruer/frostpane/releases/latest) and download the file for your system. Frostpane lives in your system tray (the menu bar on a Mac).
+
+### Windows
+
+1. Download the zip for your PC:
    - **x64** for most computers.
    - **ARM64** for Snapdragon and other ARM laptops.
    - **x86** for 32-bit Windows.
-3. Unzip it and open `frostpane.exe`. That's it. Frostpane lives in your system tray.
+2. Unzip it and open `frostpane.exe`. That's it.
 
 > **Tip:** Not sure which one you need? Open **Settings → System → About** in Windows and look at **System type**.
+
+### macOS
+
+1. Download `frostpane-…-macos-universal.dmg` (works on Apple Silicon and Intel), open it and drag **Frostpane** to **Applications**.
+2. Frostpane is not signed with an Apple developer certificate, so macOS blocks the first start. Either right-click the app and choose **Open**, or on newer macOS open **System Settings → Privacy & Security**, scroll down and choose **Open Anyway**. You can also run this once in Terminal:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Frostpane.app
+   ```
+
+3. Frostpane shows up as an icon in the menu bar. It has no Dock icon.
+
+### Linux
+
+- **AppImage** (any distribution): download `frostpane-…-linux-x64.AppImage` (or `arm64`), then `chmod +x` it and run it.
+- **Debian, Ubuntu, Mint:** `sudo apt install ./frostpane-…-linux-x64.deb`
+- **Tarball:** unpack `frostpane-…-linux-x64.tar.gz` and run `frostpane`.
+
+Desktop support:
+
+- **X11:** full support.
+- **Wayland:** KDE Plasma, sway and Hyprland are supported. GNOME runs Frostpane through XWayland with fewer features.
+- **Tray icon:** on GNOME you need the *AppIndicator and KStatusNotifierItem* extension to see it.
 
 ## 🛠️ For developers
 
